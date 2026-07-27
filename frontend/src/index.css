@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+/* Khai báo hệ thống Theme theo chuẩn Tailwind CSS v4 */
+@theme {
+  --color-bg-color: #E5E5E5;
+  --color-snd-bg-color: #14213D;
+  --color-main-color: #FCA311;
+  --color-text-color: #000000;
+
+  --color-white: #FFFFFF;
+  --color-border-color: #D1D5DB;
+  --color-hover-color: #ffb733;
+}
+
+/* Biến CSS gốc cho toàn hệ thống nếu cần dùng với thư viện khác */
+:root {
+  --bg-color: #E5E5E5;
+  --snd-bg-color: #14213D;
+  --main-color: #FCA311;
+  --text-color: #000000;
+}
