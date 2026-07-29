@@ -1,44 +1,59 @@
 import { getWebsiteProducts } from "../services/productService";
 
 export function getMaxStockForProduct(productId, flavorName) {
-  const products = getWebsiteProducts() || [];
-  const product = products.find((item) => String(item?.id) === String(productId));
+  // 🟢 1. BÓC TÁCH MẢNG AN TOÀN (Sửa lỗi products.find is not a function)
+  const rawData = getWebsiteProducts();
+  let products = [];
 
-  if (!product) return 999; // Fallback an toàn nếu không tìm thấy sản phẩm
-
-  // Nếu sản phẩm có quản lý theo kho tổng (stock) mà không có flavors
-  if (!product.flavors || product.flavors.length === 0) {
-    return Number(product.stock) ?? 999;
+  if (Array.isArray(rawData)) {
+    products = rawData;
+  } else if (rawData && Array.isArray(rawData.data)) {
+    products = rawData.data;
+  } else if (rawData && Array.isArray(rawData.products)) {
+    products = rawData.products;
   }
 
-  // Parse flavors từ nhiều định dạng dữ liệu khác nhau của Admin
+  // Nếu không lấy được mảng sản phẩm, trả về mặc định để không chặn người dùng
+  if (!products || products.length === 0) return 999;
+
+  // 🟢 2. TÌM SẢN PHẨM (Khớp cả id hoặc ProductID)
+  const product = products.find(
+    (item) => String(item?.id || item?.ProductID) === String(productId)
+  );
+
+  if (!product) return 999;
+
+  // Nếu sản phẩm không phân theo hương vị
+  if (!product.flavors || product.flavors.length === 0) {
+    return Number(product.stock ?? product.Stock ?? 999);
+  }
+
+  // 🟢 3. PARSE HƯƠNG VỊ
   let flavorsData = product.flavors;
   if (typeof flavorsData === "string") {
     try {
       flavorsData = JSON.parse(flavorsData);
     } catch (e) {
-      return Number(product.stock) ?? 999;
+      return Number(product.stock ?? product.Stock ?? 999);
     }
   }
 
   if (Array.isArray(flavorsData)) {
-    // Tìm hương vị khớp với lựa chọn của người dùng
     const matchedFlavor = flavorsData.find((f) => {
-      if (typeof f === "string") return f === flavorName;
+      if (typeof f === "string") {
+        return f.trim().toLowerCase() === String(flavorName || "").trim().toLowerCase();
+      }
       if (typeof f === "object" && f !== null) {
-        const name = f.name || f.flavor || f.flavorName || f.title || f.label || f.value || f.ten;
+        const name = f.name || f.flavor || f.flavorName || f.FlavorName || f.title || f.label || f.value || f.ten;
         return String(name).trim().toLowerCase() === String(flavorName || "").trim().toLowerCase();
       }
       return false;
     });
 
-    if (matchedFlavor) {
-      if (typeof matchedFlavor === "object") {
-        return Number(matchedFlavor.stock ?? matchedFlavor.quantity ?? matchedFlavor.soLuong ?? 999);
-      }
+    if (matchedFlavor && typeof matchedFlavor === "object") {
+      return Number(matchedFlavor.stock ?? matchedFlavor.Stock ?? matchedFlavor.quantity ?? 999);
     }
   }
 
-  // Nếu không tìm thấy vị khớp, trả về stock tổng hoặc mặc định
-  return Number(product.stock) ?? 999;
+  return Number(product.stock ?? product.Stock ?? 999);
 }

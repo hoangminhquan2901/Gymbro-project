@@ -5,7 +5,7 @@ const AuthContext = createContext(null);
 const API_URL = "http://localhost:5000/api";
 
 const CURRENT_USER_KEY = "gymbro_current_user";
-const TOKEN_KEY = "admin_token";
+const TOKEN_KEY = "token";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
@@ -21,17 +21,19 @@ export function AuthProvider({ children }) {
 
   // Lưu hoặc xóa thông tin User & Token vào localStorage
   const setCurrentUser = (userData, token = null) => {
-    setUser(userData);
-    if (userData) {
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(userData));
-      if (token) {
-        localStorage.setItem(TOKEN_KEY, token);
-      }
-    } else {
-      localStorage.removeItem(CURRENT_USER_KEY);
-      localStorage.removeItem(TOKEN_KEY);
+  setUser(userData);
+  if (userData) {
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(userData));
+    if (token) {
+      localStorage.setItem("token", token);        // Key chuẩn cho CartContext
+      localStorage.setItem("admin_token", token);  // Backup cho các module Admin
     }
-  };
+  } else {
+    localStorage.removeItem(CURRENT_USER_KEY);
+    localStorage.removeItem("token");
+    localStorage.removeItem("admin_token");
+  }
+};
 
   // 1. Hàm lấy thông tin mới nhất từ API /auth/profile
   const fetchProfile = async () => {

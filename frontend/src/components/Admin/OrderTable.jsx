@@ -16,24 +16,61 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
     return 0;
   };
 
-  // 1. Thống kê Mini Dashboard
+  // Định dạng ngày từ Database (ISO string -> HH:mm DD/MM/YYYY)
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '---';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return String(dateStr);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    } catch {
+      return String(dateStr);
+    }
+  };
+
+  // Thống kê Mini Dashboard (Hỗ trợ gộp Chờ xác nhận & Đang xử lý)
   const totalOrders = orders.length;
-  const pendingOrders = orders.filter(o => o.status === 'Chờ xác nhận').length;
-  const shippingOrders = orders.filter(o => o.status === 'Đang giao').length;
-  const completedOrders = orders.filter(o => o.status === 'Hoàn thành').length;
+  const pendingOrders = orders.filter(o => {
+    const s = o.Status || o.status;
+    return s === 'Chờ xác nhận' || s === 'Đang xử lý';
+  }).length;
+  const shippingOrders = orders.filter(o => {
+    const s = o.Status || o.status;
+    return s === 'Đang giao' || s === 'Đang vận chuyển';
+  }).length;
+  const completedOrders = orders.filter(o => {
+    const s = o.Status || o.status;
+    return s === 'Hoàn thành' || s === 'Đã giao hàng';
+  }).length;
 
   const totalRevenue = orders
-    .filter(o => o.paymentStatus === 'Đã thanh toán' || o.status === 'Hoàn thành')
-    .reduce((sum, o) => sum + parseAmount(o.totalAmount), 0);
+    .filter(o => (o.PaymentStatus || o.paymentStatus) === 'Đã thanh toán' || (o.Status || o.status) === 'Hoàn thành')
+    .reduce((sum, o) => sum + parseAmount(o.TotalAmount || o.totalAmount || o.totalPrice || o.total), 0);
 
-  // 2. Bộ lọc đa tầng
+  // Bộ lọc đa tầng 
   const filteredOrders = orders.filter(o => {
-    const idStr = String(o.id || '');
-    const nameStr = String(o.customerName || '');
-    const phoneStr = String(o.phone || '');
+    const rawId = o.OrderID || o._id || o.id || o.orderCode || '';
+    const idStr = String(rawId);
+    const nameStr = String(o.CustomerName || o.customerName || o.shippingAddress?.fullName || o.user?.fullName || '');
+    const phoneStr = String(o.Phone || o.phone || o.shippingAddress?.phone || '');
+    
+    const currentStatus = o.Status || o.status || 'Chờ xác nhận';
+    let currentPayment = o.PaymentStatus || o.paymentStatus || o.payment_status || 'Chưa thanh toán';
+    
+    // Đồng bộ điều kiện lọc theo trạng thái hoàn thành
+    if (currentStatus === 'Hoàn thành' && currentPayment === 'Chưa thanh toán') {
+      currentPayment = 'Đã thanh toán';
+    }
+
     const matchSearch = (idStr + nameStr + phoneStr).toLowerCase().includes(searchTerm.toLowerCase());
-    const matchStatus = statusFilter === 'ALL' || o.status === statusFilter;
-    const matchPayment = paymentFilter === 'ALL' || o.paymentStatus === paymentFilter;
+    
+    const matchStatus = statusFilter === 'ALL' || 
+      (statusFilter === 'Chờ xác nhận' 
+        ? (currentStatus === 'Chờ xác nhận' || currentStatus === 'Đang xử lý') 
+        : currentStatus === statusFilter);
+        
+    const matchPayment = paymentFilter === 'ALL' || currentPayment === paymentFilter;
+    
     return matchSearch && matchStatus && matchPayment;
   });
 
@@ -41,10 +78,10 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
     setStatusDrafts(prev => ({ ...prev, [orderId]: value }));
   };
 
-  const handleSaveStatus = (orderId) => {
+  const handleSaveStatus = async (orderId) => {
     const newStatus = statusDrafts[orderId];
     if (newStatus) {
-      onUpdateStatus(orderId, newStatus);
+      await onUpdateStatus(orderId, newStatus);
       setStatusDrafts(prev => {
         const copy = { ...prev };
         delete copy[orderId];
@@ -56,8 +93,10 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
   const getStatusBadge = (status) => {
     switch (status) {
       case 'Hoàn thành':
+      case 'Đã giao hàng':
         return 'bg-emerald-50 text-emerald-700 border-emerald-200/60';
       case 'Đang giao':
+      case 'Đang vận chuyển':
         return 'bg-blue-50 text-blue-700 border-blue-200/60';
       case 'Đã hủy':
         return 'bg-rose-50 text-rose-700 border-rose-200/60';
@@ -132,7 +171,7 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
             className="bg-gray-50/80 border border-gray-200/80 rounded-xl px-3 py-2 text-xs font-semibold text-gray-700 outline-none focus:bg-white focus:border-[#14213D] cursor-pointer"
           >
             <option value="ALL">📦 Tất cả trạng thái vận chuyển</option>
-            <option value="Chờ xác nhận">⏳ Chờ xác nhận</option>
+            <option value="Chờ xác nhận">⏳ Chờ xác nhận / Đang xử lý</option>
             <option value="Đang giao">🚚 Đang giao</option>
             <option value="Hoàn thành">✓ Hoàn thành</option>
             <option value="Đã hủy">✕ Đã hủy</option>
@@ -177,71 +216,90 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
               {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="py-12 text-center text-gray-400">
-                    Không tìm thấy đơn hàng phù hợp.
+                    Không tìm thấy đơn hàng phù hợp từ Database.
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((order) => {
-                  const draftVal = statusDrafts[order.id];
-                  const currentSelectVal = draftVal !== undefined ? draftVal : order.status;
-                  const isChanged = draftVal !== undefined && draftVal !== order.status;
+                filteredOrders.map((order, idx) => {
+                  const rawOrderId = order.OrderID || order._id || order.id || `UNKNOWN_${idx}`;
+                  const orderIdStr = String(rawOrderId);
+                  
+                  const statusVal = order.Status || order.status || 'Chờ xác nhận';
+                  const draftVal = statusDrafts[rawOrderId];
+                  const currentSelectVal = draftVal !== undefined ? draftVal : statusVal;
+                  const isChanged = draftVal !== undefined && draftVal !== statusVal;
+
+                  const customerName = order.CustomerName || order.customerName || order.shippingAddress?.fullName || order.user?.fullName || 'Khách vãng lai';
+                  const phone = order.Phone || order.phone || order.shippingAddress?.phone || '---';
+                  const totalAmount = parseAmount(order.TotalAmount || order.totalAmount || order.totalPrice || order.total);
+                  
+                  let paymentStatus = order.PaymentStatus || order.paymentStatus || order.payment_status || 'Chưa thanh toán';
+                  if ((statusVal === 'Hoàn thành' || currentSelectVal === 'Hoàn thành') && paymentStatus === 'Chưa thanh toán') {
+                    paymentStatus = 'Đã thanh toán';
+                  }
+
+                  const createdAt = order.CreatedAt || order.createdAt;
+
                   return (
-                    <tr key={order.id} className="hover:bg-gray-50/60 transition">
-                      <td className="py-4 px-4 font-black text-[#14213D]">#{order.id}</td>
+                    <tr key={orderIdStr} className="hover:bg-gray-50/60 transition">
+                      <td className="py-4 px-4 font-black text-[#14213D]">
+                        #{orderIdStr.length > 6 ? orderIdStr.slice(-6) : orderIdStr}
+                      </td>
                       <td className="py-4 px-4">
-                        <p className="font-bold text-gray-900">{order.customerName}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">{order.phone}</p>
+                        <p className="font-bold text-gray-900">{customerName}</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{phone}</p>
                       </td>
                       <td className="py-4 px-4 font-black text-gray-900">
-                        {parseAmount(order.totalAmount).toLocaleString('vi-VN')}đ
+                        {totalAmount.toLocaleString('vi-VN')}đ
                       </td>
                       <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border inline-flex items-center gap-1 ${getPaymentBadge(order.paymentStatus)}`}>
-                          ● {order.paymentStatus}
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border inline-flex items-center gap-1 ${getPaymentBadge(paymentStatus)}`}>
+                          ● {paymentStatus}
                         </span>
                       </td>
                       <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border inline-flex items-center gap-1 ${getStatusBadge(order.status)}`}>
-                          ● {order.status}
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border inline-flex items-center gap-1 ${getStatusBadge(statusVal)}`}>
+                          ● {statusVal}
                         </span>
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-2">
                           <select
                             value={currentSelectVal}
-                            onChange={(e) => handleStatusChangeSelect(order.id, e.target.value)}
+                            onChange={(e) => handleStatusChangeSelect(rawOrderId, e.target.value)}
                             className={`border text-xs rounded-xl px-2.5 py-1.5 outline-none font-semibold transition ${
                               isChanged ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-gray-50/80 border-gray-200 text-gray-700'
                             }`}
                           >
                             <option value="Chờ xác nhận">Chờ xác nhận</option>
+                            <option value="Đang xử lý">Đang xử lý</option>
                             <option value="Đang giao">Đang giao</option>
                             <option value="Hoàn thành">Hoàn thành</option>
                             <option value="Đã hủy">Đã hủy</option>
                           </select>
                           {isChanged && (
                             <button
-                              onClick={() => handleSaveStatus(order.id)}
-                              className="bg-[#14213D] hover:bg-black text-white text-[10px] font-bold px-3 py-1.5 rounded-xl shadow-sm transition animate-pulse"
+                              onClick={() => handleSaveStatus(rawOrderId)}
+                              className="bg-[#14213D] hover:bg-black text-white text-[10px] font-bold px-3 py-1.5 rounded-xl shadow-sm transition animate-pulse cursor-pointer"
                             >
                               Lưu
                             </button>
                           )}
                         </div>
                       </td>
-                      <td className="py-4 px-4 text-gray-400 text-[11px]">{order.createdAt}</td>
+                      <td className="py-4 px-4 text-gray-400 text-[11px]">{formatDate(createdAt)}</td>
                       <td className="py-4 px-4">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => onViewDetail(order.id)}
-                            className="p-2 hover:bg-gray-100 rounded-xl text-gray-600 transition"
+                            onClick={() => onViewDetail(rawOrderId)}
+                            className="p-2 hover:bg-gray-100 rounded-xl text-gray-600 transition cursor-pointer"
                             title="Xem chi tiết đơn hàng"
                           >
                             👁
                           </button>
                           <button
-                            onClick={() => onDeleteOrder(order.id)}
-                            className="p-2 hover:bg-rose-50 rounded-xl text-rose-500 transition"
+                            onClick={() => onDeleteOrder(rawOrderId)}
+                            className="p-2 hover:bg-rose-50 rounded-xl text-rose-500 transition cursor-pointer"
                             title="Xóa đơn hàng"
                           >
                             🗑

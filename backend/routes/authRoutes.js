@@ -23,4 +23,9 @@ router.put('/admin/customers/:id/status', verifyToken, authController.updateCust
 
 router.get('/profile', verifyToken, authController.getProfile);
 
+router.post('/forgot-password', authController.forgotPassword);
+
+// Route Đặt lại mật khẩu mới
+router.put('/reset-password', authController.resetPassword);
+
 module.exports = router;

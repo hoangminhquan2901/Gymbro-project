@@ -1,101 +1,102 @@
-// src/services/orderService.js
-import { decreaseProductStock } from "./adminProductService";
+import axiosClient from "./axiosClient";
 import { logActivity } from "../utils/activityLogger";
 
 const STORAGE_KEY = "gymbro_orders";
 
-const notifyOrderChanges = (updatedOrders) => {
-  const payload = JSON.stringify(updatedOrders);
-  window.dispatchEvent(new Event("ordersChanged"));
-  window.dispatchEvent(
-    new StorageEvent("storage", {
-      key: STORAGE_KEY,
-      newValue: payload,
-    })
-  );
-};
-
-export const getOrders = () => {
+// Hàm lấy dữ liệu dự phòng từ LocalStorage nếu API hỏng hoàn toàn
+const getLocalOrders = () => {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     return data ? JSON.parse(data) : [];
   } catch (error) {
-    console.error("Lỗi khi đọc dữ liệu đơn hàng:", error);
     return [];
+  }
+};
+
+// 1. LẤY TOÀN BỘ ĐƠN HÀNG CHO ADMIN
+export const getOrders = async () => {
+  try {
+    // Tự động gắn Token từ localStorage
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    
+    // Gọi đúng endpoint dành cho Admin ở Backend
+    const response = await axiosClient.get("/orders/admin/all", {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    // Backend trả về dạng: { success: true, data: [...] }
+    if (response.data && response.data.success) {
+      return response.data.data;
+    }
+    if (Array.isArray(response.data)) return response.data;
+    return [];
+  } catch (error) {
+    console.warn("Lỗi khi kết nối API /orders/admin/all, đang dùng dữ liệu LocalStorage dự phòng.", error);
+    return getLocalOrders();
   }
 };
 
 export const getAllOrders = getOrders;
 
-export const getOrderById = (id) => {
-  const orders = getOrders();
-  return orders.find((order) => String(order.id) === String(id)) || null;
-};
-
-// Cập nhật trạng thái đơn hàng, tự động cập nhật thanh toán và trừ tồn kho theo vị (flavor) nếu hoàn thành
-export const updateOrderStatus = (orderId, newStatus, isStockDeducted = false) => {
+// 2. LẤY CHI TIẾT 1 ĐƠN HÀNG
+export const getOrderById = async (id) => {
   try {
-    const orders = getOrders();
-    let stockDeductedFlag = isStockDeducted;
-    let targetOrderName = "";
-
-    const updatedOrders = orders.map((order) => {
-      if (String(order.id) === String(orderId)) {
-        targetOrderName = order.code || order.id;
-
-        // Nếu chuyển sang Hoàn thành và đơn này CHƯA từng trừ kho trước đó
-        if (newStatus === "Hoàn thành" && !order.isStockDeducted && !stockDeductedFlag) {
-          order.items?.forEach((item) => {
-            const targetId = item.productId || item.id || item._id;
-            const qty = Number(item.quantity) || 1;
-            const flavorName = item.flavor || item.selectedFlavor || null;
-            const itemName = item.name || null;
-
-            if (targetId || itemName) {
-              decreaseProductStock(targetId, qty, flavorName, itemName);
-            }
-          });
-          stockDeductedFlag = true;
-        }
-
-        return {
-          ...order,
-          status: newStatus,
-          paymentStatus: newStatus === "Hoàn thành" ? "Đã thanh toán" : order.paymentStatus,
-          isStockDeducted: stockDeductedFlag,
-          updatedAt: new Date().toLocaleString("vi-VN"),
-        };
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    const response = await axiosClient.get(`/orders/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`
       }
-      return order;
     });
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedOrders));
-    notifyOrderChanges(updatedOrders);
-
-    // Ghi log hoạt động cập nhật trạng thái đơn hàng
-    logActivity("Cập nhật đơn hàng", `Cập nhật trạng thái đơn hàng #${targetOrderName} thành "${newStatus}"`);
-
-    return updatedOrders;
+    if (response.data && response.data.success) {
+      return response.data.data;
+    }
+    return response.data;
   } catch (error) {
-    console.error("Lỗi khi cập nhật trạng thái đơn hàng:", error);
-    return [];
+    console.error(`Lỗi khi tải chi tiết đơn hàng #${id}:`, error);
+    const local = getLocalOrders();
+    return local.find((order) => String(order.OrderID || order.id) === String(id)) || null;
   }
 };
 
-export const deleteOrder = (id) => {
-  const orders = getOrders();
-  const orderToDelete = orders.find((order) => String(order.id) === String(id));
-  
-  const filteredOrders = orders.filter((order) => String(order.id) !== String(id));
-  
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredOrders));
-  notifyOrderChanges(filteredOrders);
+// 3. CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG (DÀNH CHO ADMIN)
+export const updateOrderStatus = async (orderId, newStatus, extraData = {}) => {
+  try {
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    
+    // Gọi đúng endpoint PUT /orders/admin/:orderId/status
+    const response = await axiosClient.put(`/orders/admin/${orderId}/status`, {
+      status: newStatus,
+      ...extraData
+    }, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
 
-  // Ghi log hoạt động xóa đơn hàng
-  if (orderToDelete) {
-    const orderName = orderToDelete.code || orderToDelete.id;
-    logActivity("Xóa đơn hàng", `Xóa đơn hàng #${orderName}`);
+    window.dispatchEvent(new Event("ordersChanged"));
+    logActivity("Cập nhật đơn hàng", `Cập nhật trạng thái đơn hàng #${orderId} thành "${newStatus}"`);
+    return response.data;
+  } catch (error) {
+    console.error("Lỗi khi cập nhật trạng thái đơn hàng:", error);
+    throw error;
   }
+};
 
-  return filteredOrders;
+// 4. XÓA ĐƠN HÀNG
+export const deleteOrder = async (orderId) => {
+  try {
+    const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
+    const response = await axiosClient.delete(`/orders/${orderId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Lỗi khi xóa đơn hàng:", error);
+    throw error;
+  }
 };

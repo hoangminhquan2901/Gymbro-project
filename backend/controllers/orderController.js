@@ -12,8 +12,8 @@ const generateOrderId = () => {
 // ==========================================
 exports.createOrder = async (req, res) => {
     const { customerName, phone, email, address, note, paymentMethod } = req.body;
-    const userId = req.user.userId;
-    const customerId = req.user.customerId || null; // CustomerID nếu người dùng là Khách hàng
+    const userId = req.user.userId || req.user.id || req.user.UserID;
+    let customerId = req.user.customerId || req.user.CustomerID || null;
 
     if (!customerName || !phone || !address) {
         return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ Tên, Số điện thoại và Địa chỉ giao hàng!' });
@@ -24,6 +24,17 @@ exports.createOrder = async (req, res) => {
     try {
         await connection.beginTransaction();
 
+        // Tự động tìm CustomerID nếu trong token chưa có
+        if (!customerId && userId) {
+            const [customers] = await connection.query(
+                'SELECT CustomerID FROM Customers WHERE UserID = ?',
+                [userId]
+            );
+            if (customers.length > 0) {
+                customerId = customers[0].CustomerID;
+            }
+        }
+
         // 1. Lấy CartID của User
         const [carts] = await connection.query('SELECT CartID FROM Cart WHERE UserID = ?', [userId]);
         if (carts.length === 0) {
@@ -32,14 +43,14 @@ exports.createOrder = async (req, res) => {
         }
         const cartId = carts[0].CartID;
 
-        // 2. Lấy thông tin chi tiết các món trong Giỏ hàng (Join để lấy tên snapshot)
+        // 2. Lấy thông tin chi tiết các món trong Giỏ hàng
         const queryItems = `
             SELECT 
                 ci.ProductID,
                 ci.FlavorID,
                 ci.Quantity,
                 ci.Price,
-                p.ProductName,
+                p.Name AS ProductName,
                 pf.FlavorName
             FROM CartItems ci
             JOIN Products p ON ci.ProductID = p.ProductID
@@ -78,6 +89,18 @@ exports.createOrder = async (req, res) => {
         // 6. Xóa toàn bộ sản phẩm trong giỏ hàng sau khi đã đặt hàng thành công
         await connection.query('DELETE FROM CartItems WHERE CartID = ?', [cartId]);
 
+        // 💡 7. CẬP NHẬT TĂNG SỐ ĐƠN & TỔNG CHI TIÊU VÀO BẢNG CUSTOMERS
+        if (customerId) {
+            await connection.query(
+                `UPDATE Customers 
+                 SET TotalOrders = TotalOrders + 1,
+                     TotalSpent = TotalSpent + ?,
+                     LastOrderDate = NOW()
+                 WHERE CustomerID = ?`,
+                [totalAmount, customerId]
+            );
+        }
+
         await connection.commit();
 
         return res.status(201).json({
@@ -100,15 +123,28 @@ exports.createOrder = async (req, res) => {
 // ==========================================
 exports.getMyOrders = async (req, res) => {
     try {
-        const customerId = req.user.customerId;
+        const userId = req.user.userId || req.user.id || req.user.UserID;
+        const userEmail = req.user.email || '';
+        let customerId = req.user.customerId || req.user.CustomerID;
 
-        if (!customerId) {
-            return res.status(400).json({ success: false, message: 'Không tìm thấy ID khách hàng!' });
+        // 1. Tự động tìm CustomerID từ UserID nếu chưa có trong token
+        if (!customerId && userId) {
+            const [customers] = await db.query(
+                'SELECT CustomerID FROM Customers WHERE UserID = ?',
+                [userId]
+            );
+            if (customers.length > 0) {
+                customerId = customers[0].CustomerID;
+            }
         }
 
+        // 2. Tra cứu đơn hàng theo CustomerID HOẶC Email tài khoản
         const [orders] = await db.query(
-            `SELECT * FROM Orders WHERE CustomerID = ? ORDER BY CreatedAt DESC`,
-            [customerId]
+            `SELECT * FROM Orders 
+             WHERE (CustomerID IS NOT NULL AND CustomerID = ?) 
+                OR (Email IS NOT NULL AND Email = ?)
+             ORDER BY CreatedAt DESC`,
+            [customerId || '', userEmail]
         );
 
         return res.status(200).json({
@@ -117,7 +153,10 @@ exports.getMyOrders = async (req, res) => {
         });
     } catch (error) {
         console.error('Lỗi getMyOrders:', error);
-        return res.status(500).json({ success: false, message: 'Lỗi server khi lấy danh sách đơn hàng!' });
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Lỗi server khi lấy danh sách đơn hàng!' 
+        });
     }
 };
 
@@ -190,5 +229,53 @@ exports.updateOrderStatus = async (req, res) => {
     } catch (error) {
         console.error('Lỗi updateOrderStatus:', error);
         return res.status(500).json({ success: false, message: 'Lỗi server khi cập nhật trạng thái đơn hàng!' });
+    }
+};
+
+// ==========================================
+// 6. API DÀNH CHO ADMIN: XÓA VĨNH VIỄN ĐƠN HÀNG
+// ==========================================
+exports.deleteOrder = async (req, res) => {
+    const { orderId } = req.params;
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Lấy thông tin đơn hàng trước khi xóa để biết CustomerID và TotalAmount cần trừ lại
+        const [orders] = await connection.query('SELECT CustomerID, TotalAmount FROM Orders WHERE OrderID = ?', [orderId]);
+        if (orders.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng!' });
+        }
+
+        const { CustomerID, TotalAmount } = orders[0];
+
+        // 2. Xóa đơn hàng (Bảng OrderDetails sẽ tự động xóa theo CASCADE trong CSDL)
+        await connection.query('DELETE FROM Orders WHERE OrderID = ?', [orderId]);
+
+        // 💡 3. CẬP NHẬT GIẢM SỐ ĐƠN & TRỪ TIỀN Ở BẢNG CUSTOMERS NẾU CÓ
+        if (CustomerID) {
+            await connection.query(
+                `UPDATE Customers 
+                 SET TotalOrders = GREATEST(TotalOrders - 1, 0),
+                     TotalSpent = GREATEST(TotalSpent - ?, 0)
+                 WHERE CustomerID = ?`,
+                [TotalAmount, CustomerID]
+            );
+        }
+
+        await connection.commit();
+
+        return res.status(200).json({ 
+            success: true, 
+            message: 'Xóa đơn hàng thành công!' 
+        });
+    } catch (error) {
+        await connection.rollback();
+        console.error('Lỗi deleteOrder:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi xóa đơn hàng!' });
+    } finally {
+        connection.release();
     }
 };
