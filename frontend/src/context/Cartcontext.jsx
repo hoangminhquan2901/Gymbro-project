@@ -3,6 +3,15 @@ import axios from "axios";
 
 const CartContext = createContext(null);
 
+// Hàm lấy token động chuẩn xác
+const getToken = () => {
+  return (
+    localStorage.getItem("token") ||
+    localStorage.getItem("admin_token") ||
+    localStorage.getItem("accessToken")
+  );
+};
+
 const generateCartItemId = (product) => {
   const pId = product.id ?? product.ProductID ?? "unknown";
   const flavor = product.flavor ? String(product.flavor).trim().toLowerCase() : "default";
@@ -14,12 +23,10 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Lấy token xác thực người dùng từ LocalStorage (chỉnh lại key token nếu cần)
-  const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
-
   // 1. ĐỌC DỮ LIỆU TỪ DATABASE HOẶC LOCALSTORAGE
   const fetchCart = useCallback(async () => {
     setLoading(true);
+    const token = getToken();
 
     // TH 1: Người dùng ĐÃ ĐĂNG NHẬP -> Ưu tiên lấy từ DB
     if (token) {
@@ -29,16 +36,18 @@ export function CartProvider({ children }) {
         });
 
         if (res.data && res.data.success) {
+          const rawItems = res.data.data?.items || res.data.items || [];
+          
           // Format lại dữ liệu từ Database về chuẩn chung của Client
-          const dbItems = (res.data.data?.items || res.data.items || []).map((item) => ({
-            id: item.ProductID || item.id,
-            cartItemId: item.CartItemID || item.cartItemId || item.id, // Đảm bảo lấy chuẩn CartItemID từ MySQL
-            name: item.ProductName || item.name,
-            image: item.ProductImage || item.image,
-            price: item.Price || item.price,
-            quantity: item.Quantity || item.quantity || 1,
-            flavor: item.FlavorName || item.flavor || "",
-            size: item.SizeName || item.size || "",
+          const dbItems = rawItems.map((item, index) => ({
+            id: item.ProductID || item.productId || item.id,
+            cartItemId: item.CartItemID || item.cartItemId || item.id || index,
+            name: item.ProductName || item.productName || item.name,
+            image: item.ProductImage || item.productImage || item.image,
+            price: Number(item.Price || item.price || 0),
+            quantity: Number(item.Quantity || item.quantity || 1),
+            flavor: item.FlavorName || item.flavorName || item.flavor || "",
+            size: item.SizeName || item.sizeName || item.size || "",
           }));
 
           setItems(dbItems);
@@ -59,7 +68,7 @@ export function CartProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchCart();
@@ -72,102 +81,114 @@ export function CartProvider({ children }) {
   };
 
   // 2. THÊM SẢN PHẨM VÀO GIỎ
-  async function addToCart(product, quantity = 1) {
-    const cartItemId = product.cartItemId || generateCartItemId(product);
+  const addToCart = async (product, quantity = 1) => {
+    const token = getToken(); // ✅ Đã sửa: Dùng getToken() thay vì getItem("token")
 
-    if (token) {
-      try {
-        await axios.post(
-            "http://localhost:5000/api/cart/add",
-            {
-                productId: product.ProductID || product.id,
-                flavorId: product.FlavorID || product.flavorId,
-                quantity,
-                price: product.Price || product.price
-            },
-            {
-                headers:{
-                    Authorization:`Bearer ${token}`
-                }
-            }
-        );
-        // Tải lại giỏ hàng từ DB sau khi thêm thành công
+    if (!token) {
+      alert("🔑 Bạn cần đăng nhập để thực hiện thao tác này!");
+      return;
+    }
+
+    try {
+      const payload = {
+        productId: product.id || product.ProductID,
+        flavorId: product.flavorId || 1,
+        flavor: product.flavor || "",
+        quantity: Number(quantity),
+        price: Number(product.price || product.Price || 0),
+      };
+
+      const response = await axios.post("http://localhost:5000/api/cart", payload, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+      });
+
+      if (response.data?.success) {
+        // Cập nhật lại giỏ hàng lập tức
         await fetchCart();
-        return;
-      } catch (err) {
-        console.error("Lỗi thêm vào giỏ hàng Database:", err);
       }
+    } catch (err) {
+      console.error("❌ [LỖI GỌI API CART]:", err.response?.data || err.message);
+      throw err;
     }
+  };
 
-    // Nếu chưa đăng nhập: Lưu vào LocalStorage
-    const existingIndex = items.findIndex((item) => {
-      const itemKey = item.cartItemId || generateCartItemId(item);
-      return itemKey === cartItemId;
-    });
-
-    let newItems;
-    if (existingIndex > -1) {
-      newItems = items.map((item, index) =>
-        index === existingIndex
-          ? { ...item, cartItemId, quantity: item.quantity + quantity }
-          : item
-      );
-    } else {
-      newItems = [...items, { ...product, cartItemId, quantity }];
-    }
-
-    saveToLocal(newItems);
-  }
-
-  // 3. XÓA SẢN PHẨM
+  // 3. XÓA SẢN PHẨM KHỎI GIỎ HÀNG (CẬP NHẬT TỨC THÌ)
   async function removeFromCart(targetKey) {
+    // ⚡ Cập nhật Giao diện ngay lập tức trước khi gọi Server
+    setItems((prevItems) =>
+      prevItems.filter((item) => {
+        const itemKey = item.cartItemId || generateCartItemId(item);
+        return String(itemKey) !== String(targetKey) && String(item.id) !== String(targetKey);
+      })
+    );
+
+    const token = getToken();
+
     if (token) {
       try {
         await axios.delete(`http://localhost:5000/api/cart/items/${targetKey}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        await fetchCart();
-        return;
+        await fetchCart(); // Đồng bộ lại chuẩn xác từ DB
       } catch (err) {
         console.error("Lỗi xóa sản phẩm khỏi Database:", err);
+        await fetchCart(); // Khôi phục lại state nếu server báo lỗi
       }
+      return; // ✅ Ngăn trôi xuống code LocalStorage
     }
 
-    // Nếu chưa đăng nhập
+    // Khách chưa đăng nhập
     const newItems = items.filter((item) => {
       const itemKey = item.cartItemId || generateCartItemId(item);
-      return itemKey !== targetKey && String(item.id) !== String(targetKey);
+      return String(itemKey) !== String(targetKey) && String(item.id) !== String(targetKey);
     });
 
     saveToLocal(newItems);
   }
 
-  // 4. CẬP NHẬT SỐ LƯỢNG
+  // 4. CẬP NHẬT SỐ LƯỢNG SẢN PHẨM (CẬP NHẬT TỨC THÌ)
   async function updateQuantity(targetKey, newQuantity) {
     if (newQuantity < 1) {
       removeFromCart(targetKey);
       return;
     }
 
+    // ⚡ Cập nhật Giao diện ngay lập tức trước khi gọi Server
+    setItems((prevItems) =>
+      prevItems.map((item) => {
+        const itemKey = item.cartItemId || generateCartItemId(item);
+        if (String(itemKey) === String(targetKey) || String(item.id) === String(targetKey)) {
+          return { ...item, quantity: Number(newQuantity) };
+        }
+        return item;
+      })
+    );
+
+    const token = getToken();
+
     if (token) {
       try {
         await axios.put(
           `http://localhost:5000/api/cart/items/${targetKey}`,
-          { quantity: newQuantity },
+          { quantity: Number(newQuantity) },
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        await fetchCart();
-        return;
+        await fetchCart(); // Đồng bộ chuẩn lại với DB
       } catch (err) {
         console.error("Lỗi cập nhật số lượng trong Database:", err);
+        await fetchCart(); // Revert lại nếu có lỗi
       }
+      return; // ✅ Ngăn trôi xuống code LocalStorage
     }
 
-    // Nếu chưa đăng nhập
+    // Khách chưa đăng nhập
     const newItems = items.map((item) => {
       const itemKey = item.cartItemId || generateCartItemId(item);
-      if (itemKey === targetKey || String(item.id) === String(targetKey)) {
-        return { ...item, quantity: newQuantity };
+      if (String(itemKey) === String(targetKey) || String(item.id) === String(targetKey)) {
+        return { ...item, quantity: Number(newQuantity) };
       }
       return item;
     });
@@ -177,6 +198,11 @@ export function CartProvider({ children }) {
 
   // 5. XÓA SẠCH GIỎ HÀNG
   async function clearCart() {
+    setItems([]);
+    localStorage.removeItem("cart");
+
+    const token = getToken();
+
     if (token) {
       try {
         await axios.delete("http://localhost:5000/api/cart/clear", {
@@ -186,11 +212,9 @@ export function CartProvider({ children }) {
         console.error("Lỗi xóa giỏ hàng Database:", err);
       }
     }
-
-    setItems([]);
-    localStorage.removeItem("cart");
   }
 
+  // Tính tổng số lượng hiển thị Badge trên Header
   const totalCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
   return (

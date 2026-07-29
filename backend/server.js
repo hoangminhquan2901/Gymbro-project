@@ -13,8 +13,16 @@ const orderRoutes = require('./routes/orderRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middlewares
-app.use(cors());
+// ==========================================
+// CẤU HÌNH CORS MỞ RỘNG (CHO PHÉP TẤT CẢ HEADERS)
+// ==========================================
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: '*', // Cho phép tất cả Headers (Pragma, Cache-Control, Authorization, v.v.)
+  credentials: true
+}));
+
 app.use(express.json());
 
 // Routes API

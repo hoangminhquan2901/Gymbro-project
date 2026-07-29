@@ -7,7 +7,7 @@ const { verifyToken } = require('../middlewares/authMiddleware');
 router.use(verifyToken);
 
 router.get('/', cartController.getCart);
-router.post('/add', cartController.addToCart);
+router.post('/', cartController.addToCart); // 👈 Sửa từ '/add' thành '/' cho khớp với Frontend
 router.put('/items/:cartItemId', cartController.updateCartItem);
 router.delete('/items/:cartItemId', cartController.removeCartItem);
 router.delete('/clear', cartController.clearCart);

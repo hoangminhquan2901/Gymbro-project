@@ -1,6 +1,9 @@
 import React from "react";
 import { X, Layers, Award, Target, Package, Tag } from "lucide-react";
 
+// Ảnh SVG Data URI dạng No Image sạch sẽ, không gọi request mạng ngoài
+const DEFAULT_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'%3E%3C/rect%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'%3E%3C/circle%3E%3Cpolyline points='21 15 16 10 5 21'%3E%3C/polyline%3E%3C/svg%3E";
+
 function ProductDetailModal({ isOpen, onClose, product }) {
   if (!isOpen || !product) return null;
 
@@ -58,12 +61,12 @@ function ProductDetailModal({ isOpen, onClose, product }) {
           <div className="flex gap-5 items-start pb-5 border-b border-[#e4e2e5]">
             <div className="w-28 h-28 rounded-lg border border-[#c5c6ce] bg-[#f5f3f6] overflow-hidden shrink-0 shadow-sm flex items-center justify-center">
               <img
-                src={productImage || "https://via.placeholder.com/120"}
-                alt={productName}
+                src={productImage || DEFAULT_IMAGE}
+                alt={productName || "Product image"}
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = "https://via.placeholder.com/120";
+                  e.target.onerror = null; // Ngăn vòng lặp vô hạn
+                  e.target.src = DEFAULT_IMAGE;
                 }}
               />
             </div>

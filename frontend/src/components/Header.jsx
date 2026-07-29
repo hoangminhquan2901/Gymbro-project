@@ -10,24 +10,71 @@ const KEYWORDS = [
   { label: "EAAs", path: "/category/eaas" },
   { label: "Creatine", path: "/category/creatine" },
   { label: "Vitamin D3 K2", path: "/category/vitamin-d3-k2" },
-  { label: "Dầu Cá Omega 3", path: "/category/dau-ca-omega3" },
+  { label: "Dầu Cá Omega 3", path: "/category/omega3" },
 ];
 
 const MAX_SUGGESTIONS = 6;
 
+// Hàm định dạng giá tiền kiểu Việt Nam (Ví dụ: 3360000 -> 3.360.000 đ)
+const formatPrice = (price) => {
+  if (price === null || price === undefined || price === "") return "";
+  const num = Number(price);
+  if (isNaN(num)) return price;
+  return num.toLocaleString("vi-VN") + " đ";
+};
+
 function Header() {
   const navigate = useNavigate();
-  const { totalCount } = useCart();
+  
+  const cartContext = useCart() || {};
+  const { totalCount, cartItems, items, fetchCart, getCart } = cartContext;
+
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [productList, setProductList] = useState([]);
   const wrapperRef = useRef(null);
 
-  // Lấy danh sách sản phẩm mới nhất (bao gồm cả sản phẩm admin mới thêm)
+  // Tự động gọi API cập nhật giỏ hàng khi Header mount
   useEffect(() => {
-    const fetchProducts = () => {
-      const data = getWebsiteProducts();
-      setProductList(data || []);
+    if (typeof fetchCart === "function") fetchCart();
+    else if (typeof getCart === "function") getCart();
+  }, [fetchCart, getCart]);
+
+  // Tính toán chính xác tổng số lượng sản phẩm trong giỏ hàng
+  const displayCartCount = useMemo(() => {
+    if (typeof totalCount === "number" && totalCount >= 0) {
+      return totalCount;
+    }
+
+    const rawList = cartItems || items || [];
+    if (Array.isArray(rawList)) {
+      return rawList.reduce((sum, item) => {
+        const qty = Number(item.Quantity || item.quantity || 1);
+        return sum + qty;
+      }, 0);
+    }
+
+    return 0;
+  }, [totalCount, cartItems, items]);
+
+  // Lấy danh sách sản phẩm từ cơ sở dữ liệu
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const response = await getWebsiteProducts();
+        let actualData = [];
+        if (Array.isArray(response)) {
+          actualData = response;
+        } else if (response && Array.isArray(response.data)) {
+          actualData = response.data;
+        } else if (response && Array.isArray(response.products)) {
+          actualData = response.products;
+        }
+        setProductList(actualData);
+      } catch (error) {
+        console.error("Lỗi tải danh sách sản phẩm:", error);
+        setProductList([]);
+      }
     };
 
     fetchProducts();
@@ -44,13 +91,17 @@ function Header() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Tối ưu lọc gợi ý bằng useMemo dựa trên productList động
+  // Tối ưu lọc gợi ý dựa trên cột Name trong bảng Products
   const suggestions = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) return [];
-    return productList.filter((p) =>
-      p.name?.toLowerCase().includes(trimmed)
-    ).slice(0, MAX_SUGGESTIONS);
+    const safeList = Array.isArray(productList) ? productList : [];
+    return safeList
+      .filter((p) => {
+        const productName = p.Name || p.name || "";
+        return productName.toLowerCase().includes(trimmed);
+      })
+      .slice(0, MAX_SUGGESTIONS);
   }, [query, productList]);
 
   const handleSearch = (e) => {
@@ -110,9 +161,17 @@ function Header() {
                       setQuery(e.target.value);
                       setShowSuggestions(true);
                     }}
-                    onFocus={() => {
-                      // Reload lại danh sách sản phẩm mỗi khi ô tìm kiếm được focus để lấy dữ liệu mới nhất
-                      setProductList(getWebsiteProducts() || []);
+                    onFocus={async () => {
+                      try {
+                        const response = await getWebsiteProducts();
+                        let actualData = [];
+                        if (Array.isArray(response)) actualData = response;
+                        else if (response && Array.isArray(response.data)) actualData = response.data;
+                        else if (response && Array.isArray(response.products)) actualData = response.products;
+                        setProductList(actualData);
+                      } catch (err) {
+                        setProductList([]);
+                      }
                       setShowSuggestions(true);
                     }}
                     onKeyDown={handleKeyDown}
@@ -156,27 +215,35 @@ function Header() {
                 {showSuggestions && query.trim() && (
                   <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-100 rounded-xl shadow-2xl z-50 max-h-96 overflow-y-auto divide-y divide-gray-100">
                     {suggestions.length > 0 ? (
-                      suggestions.map((product) => (
-                        <button
-                          key={product.id}
-                          onClick={() => handleSelectSuggestion(product.id)}
-                          className="w-full flex items-center gap-4 px-4 py-3 hover:bg-amber-50/50 text-left transition-colors duration-150 cursor-pointer group"
-                        >
-                          <img
-                            src={product.image || null}
-                            alt={product.name}
-                            className="w-12 h-12 rounded-lg object-cover flex-shrink-0 bg-gray-50 border border-gray-100 group-hover:scale-105 transition-transform"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900 truncate group-hover:text-[#14213D]">
-                              {product.name}
-                            </p>
-                            <p className="text-sm font-bold text-[#FCA311] mt-0.5">
-                              {product.price}
-                            </p>
-                          </div>
-                        </button>
-                      ))
+                      suggestions.map((product) => {
+                        const pId = product.ProductID || product.id;
+                        const pName = product.Name || product.name;
+                        const pPrice = product.Price || product.price;
+                        const pImage = product.Image || product.image;
+
+                        return (
+                          <button
+                            key={pId}
+                            onClick={() => handleSelectSuggestion(pId)}
+                            className="w-full flex items-center gap-4 px-4 py-3 hover:bg-amber-50/50 text-left transition-colors duration-150 cursor-pointer group"
+                          >
+                            <img
+                              src={pImage || null}
+                              alt={pName}
+                              className="w-12 h-12 rounded-lg object-cover flex-shrink-0 bg-gray-50 border border-gray-100 group-hover:scale-105 transition-transform"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate group-hover:text-[#14213D]">
+                                {pName}
+                              </p>
+                              {/* Đã áp dụng hàm formatPrice để hiển thị dấu chấm phân cách và chữ đ */}
+                              <p className="text-sm font-bold text-[#FCA311] mt-0.5">
+                                {formatPrice(pPrice)}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })
                     ) : (
                       <div className="px-4 py-8 text-center text-gray-400 text-sm">
                         Không tìm thấy sản phẩm phù hợp với "<span className="text-gray-700 font-medium">{query}</span>"
@@ -233,20 +300,20 @@ function Header() {
                 </div>
               </div>
 
-              {/* CART */}
+              {/* NÚT BẤM GIỎ HÀNG */}
               <Link
                 to="/cart"
                 className="
                   relative flex items-center gap-2.5 px-5 py-3 rounded-xl
                   border border-[#FCA311]/40 bg-[#1B2B4A] text-white
                   hover:border-[#FCA311] hover:bg-[#22375d] active:scale-95
-                  transition-all duration-200 shadow-md
+                  transition-all duration-200 shadow-md group
                 "
               >
                 <div className="relative">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-6 w-6 text-[#FCA311]"
+                    className="h-6 w-6 text-[#FCA311] group-hover:scale-110 transition-transform"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -258,9 +325,10 @@ function Header() {
                       d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
                     />
                   </svg>
-                  {totalCount > 0 && (
-                    <span className="absolute -top-2.5 -right-2.5 min-w-5 h-5 px-1 bg-[#FCA311] text-[#14213D] text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-[#14213D] shadow-sm">
-                      {totalCount > 99 ? "99+" : totalCount}
+                  
+                  {displayCartCount > 0 && (
+                    <span className="absolute -top-2.5 -right-2.5 min-w-5 h-5 px-1.5 bg-[#FCA311] text-[#14213D] text-[11px] font-extrabold rounded-full flex items-center justify-center border-2 border-[#14213D] shadow-sm animate-pulse">
+                      {displayCartCount > 99 ? "99+" : displayCartCount}
                     </span>
                   )}
                 </div>

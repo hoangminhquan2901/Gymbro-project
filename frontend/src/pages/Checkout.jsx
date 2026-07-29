@@ -2,20 +2,9 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
+import { useCart } from "../context/CartContext";
 
-const PROVINCES = [
-  "Hà Nội", "TP Hồ Chí Minh", "An Giang", "Bà Rịa-Vũng Tàu", "Bắc Giang",
-  "Bắc Kạn", "Bạc Liêu", "Bắc Ninh", "Bến Tre", "Bình Định", "Bình Dương",
-  "Bình Phước", "Bình Thuận", "Cà Mau", "Cần Thơ", "Cao Bằng", "Đà Nẵng",
-  "Đắc Lắc", "Đắk Nông", "Điện Biên", "Đồng Nai", "Đồng Tháp", "Gia Lai",
-  "Hà Giang", "Hà Nam", "Hà Tĩnh", "Hải Dương", "Hải Phòng", "Hậu Giang",
-  "Hòa Bình", "Hưng Yên", "Khánh Hòa", "Kiên Giang", "Kon Tum", "Lai Châu",
-  "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An", "Nam Định", "Nghệ An",
-  "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên", "Quảng Bình", "Quảng Nam",
-  "Quảng Ngãi", "Quảng Ninh", "Quảng Trị", "Sóc Trăng", "Sơn La", "Tây Ninh",
-  "Thái Bình", "Thái Nguyên", "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang",
-  "Trà Vinh", "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái",
-];
+const PROVINCES = ["Hà Nội"];
 
 const DISTRICTS = {
   "Hà Nội": [
@@ -24,12 +13,6 @@ const DISTRICTS = {
     "Quận Long Biên", "Quận Nam Từ Liêm", "Quận Tây Hồ", "Quận Thanh Xuân",
     "Quận Bắc Từ Liêm", "Huyện Ba Vì", "Huyện Chương Mỹ", "Huyện Đan Phượng",
     "Huyện Đông Anh", "Huyện Gia Lâm", "Huyện Hoài Đức", "Huyện Mê Linh",
-  ],
-  "TP Hồ Chí Minh": [
-    "Quận 1", "Quận 2", "Quận 3", "Quận 4", "Quận 5", "Quận 6",
-    "Quận 7", "Quận 8", "Quận 9", "Quận 10", "Quận 11", "Quận 12",
-    "Quận Bình Tân", "Quận Bình Thạnh", "Quận Gò Vấp", "Quận Phú Nhuận",
-    "Quận Tân Bình", "Quận Tân Phú", "Quận Thủ Đức",
   ],
 };
 
@@ -52,6 +35,9 @@ const WARDS = {
     "Phường Phạm Ngũ Lão", "Phường Tân Định",
   ],
 };
+
+// Ảnh mặc định dạng SVG nội bộ (Không gọi internet)
+const FALLBACK_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 24 24' fill='none' stroke='%23cbd5e1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'%3E%3C/rect%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'%3E%3C/circle%3E%3Cpolyline points='21 15 16 10 5 21'%3E%3C/polyline%3E%3C/svg%3E";
 
 function SearchableSelect({ label, value, onChange, options, placeholder, disabled, isOpen, onToggle }) {
   const [search, setSearch] = useState("");
@@ -114,18 +100,23 @@ function SearchableSelect({ label, value, onChange, options, placeholder, disabl
           </div>
           <div className="overflow-y-auto flex-1">
             {filtered.length > 0 ? (
-              filtered.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => handleSelect(opt)}
-                  className={`w-full text-left px-3 py-2.5 text-sm hover:bg-gray-50 cursor-pointer transition ${
-                    value === opt ? "bg-[#14213D] text-white hover:bg-[#14213D]" : "text-[#14213D]"
-                  }`}
-                >
-                  {opt}
-                </button>
-              ))
+              filtered.map((opt) => {
+                const isSelected = value === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => handleSelect(opt)}
+                    className={`w-full text-left px-3 py-2.5 text-sm cursor-pointer transition ${
+                      isSelected
+                        ? "bg-[#14213D] text-white hover:bg-[#1c2b4d]"
+                        : "text-[#14213D] hover:bg-gray-100"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })
             ) : (
               <div className="px-3 py-4 text-sm text-gray-400 text-center">Không tìm thấy</div>
             )}
@@ -152,17 +143,17 @@ export default function Checkout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  
+  const cartContext = useCart();
+  const items = cartContext?.items || [];
+  const loading = cartContext?.loading || false;
+  const fetchCart = cartContext?.fetchCart;
+  const clearCart = cartContext?.clearCart;
 
   const token = localStorage.getItem("token");
-
-  // Lấy dữ liệu giỏ hàng từ Server DB
-  const [items, setItems] = useState([]);
-  const [total, setTotal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
-  // Nhận dữ liệu truyền từ Cart qua location.state
   const { deliveryDate, deliveryTime, cartNote } = location.state || {};
-
   const [activeDropdown, setActiveDropdown] = useState("");
 
   const [form, setForm] = useState({
@@ -176,25 +167,11 @@ export default function Checkout() {
     note: "",
   });
 
-  // 1. Tải thông tin giỏ hàng từ API
-  useEffect(() => {
-    const fetchCart = async () => {
-      try {
-        const res = await axios.get("http://localhost:5000/api/cart", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.data.success) {
-          setItems(res.data.data.items || []);
-          setTotal(res.data.data.totalAmount || 0);
-        }
-      } catch (error) {
-        console.error("Lỗi tải giỏ hàng:", error);
-      }
-    };
-    if (token) fetchCart();
-  }, [token]);
+  const total = items.reduce(
+    (sum, item) => sum + parsePrice(item.price || item.Price) * Number(item.quantity || item.Quantity || 1),
+    0
+  );
 
-  // 2. Autofill thông tin người dùng từ AuthContext
   useEffect(() => {
     if (user) {
       setForm((prev) => ({
@@ -206,7 +183,6 @@ export default function Checkout() {
     }
   }, [user]);
 
-  // 3. Tự động thêm ghi chú ngày/giờ giao hàng
   useEffect(() => {
     let generatedNotes = [];
 
@@ -242,7 +218,6 @@ export default function Checkout() {
   }, [deliveryDate, deliveryTime, cartNote]);
 
   const isAddressComplete = form.province && form.district && form.ward && form.address;
-
   const availableDistricts = DISTRICTS[form.province] ?? [];
   const availableWards = WARDS[form.district] ?? [];
 
@@ -255,9 +230,6 @@ export default function Checkout() {
     });
   }
 
-  // ==========================================
-  // 4. GỬI ĐƠN HÀNG LÊN BACKEND (GHI VÀO DATABASE)
-  // ==========================================
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -284,7 +256,18 @@ export default function Checkout() {
       });
 
       if (res.data.success) {
-        alert(`Đặt hàng thành công! Mã đơn hàng: ${res.data.orderId}`);
+        alert(`Đặt hàng thành công! Mã đơn hàng: ${res.data.orderId || res.data.data?.orderId}`);
+
+        if (typeof clearCart === "function") {
+          clearCart();
+        }
+        if (typeof fetchCart === "function") {
+          await fetchCart();
+        }
+        
+        localStorage.removeItem("gymbro_cart");
+        window.dispatchEvent(new Event("cartUpdated"));
+
         navigate("/profile/orders");
       }
     } catch (error) {
@@ -295,10 +278,18 @@ export default function Checkout() {
     }
   }
 
+  if (loading && items.length === 0) {
+    return (
+      <div className="max-w-2xl mx-auto my-20 text-center">
+        <p className="text-gray-500 mb-4">Đang tải thông tin đơn hàng...</p>
+      </div>
+    );
+  }
+
   if (items.length === 0) {
     return (
       <div className="max-w-2xl mx-auto my-20 text-center">
-        <p className="text-gray-500 mb-4">Giỏ hàng trống hoặc chưa tải xong, không thể thanh toán.</p>
+        <p className="text-gray-500 mb-4">Giỏ hàng trống, không thể thanh toán.</p>
         <Link to="/" className="text-[#FCA311] font-bold hover:underline">← Quay về trang chủ</Link>
       </div>
     );
@@ -453,33 +444,50 @@ export default function Checkout() {
         {/* RIGHT — ĐƠN HÀNG */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-[#d6d6d6] h-fit">
           <h3 className="text-base font-black text-[#14213D] mb-4">
-            Đơn hàng ({items.reduce((s, i) => s + i.Quantity, 0)} sản phẩm)
+            Đơn hàng ({items.reduce((s, i) => s + Number(i.quantity || i.Quantity || 1), 0)} sản phẩm)
           </h3>
 
           <div className="divide-y divide-gray-100 mb-6">
-            {items.map((item) => (
-              <div key={item.CartItemID} className="flex items-center gap-3 py-3">
-                <div className="relative flex-shrink-0">
-                  <img
-                    src={item.ProductImage || "https://via.placeholder.com/150"}
-                    alt={item.ProductName}
-                    className="w-14 h-14 rounded-lg object-cover bg-gray-100 border border-gray-100"
-                  />
-                  <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-[#14213D] text-white text-[10px] font-black rounded-full flex items-center justify-center">
-                    {item.Quantity}
-                  </span>
+            {items.map((item, idx) => {
+              const itemKey = item.cartItemId || item.CartItemID || item.id || idx;
+              const name = item.name || item.ProductName || "Sản phẩm";
+              
+              // Sử dụng FALLBACK_IMAGE thay vì via.placeholder.com
+              const image = item.image || item.ProductImage || FALLBACK_IMAGE;
+              
+              const price = parsePrice(item.price || item.Price);
+              const qty = Number(item.quantity || item.Quantity || 1);
+              const subTotal = item.SubTotal ? parsePrice(item.SubTotal) : price * qty;
+              const flavor = item.flavor || item.FlavorName;
+
+              return (
+                <div key={itemKey} className="flex items-center gap-3 py-3">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={image}
+                      alt={name}
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = FALLBACK_IMAGE;
+                      }}
+                      className="w-14 h-14 rounded-lg object-cover bg-gray-100 border border-gray-100"
+                    />
+                    <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-[#14213D] text-white text-[10px] font-black rounded-full flex items-center justify-center">
+                      {qty}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-[#14213D] line-clamp-2">{name}</p>
+                    {flavor && (
+                      <p className="text-[10px] text-gray-400">{flavor}</p>
+                    )}
+                  </div>
+                  <p className="text-sm font-bold text-[#14213D] flex-shrink-0">
+                    {formatPrice(subTotal)}
+                  </p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-[#14213D] line-clamp-2">{item.ProductName}</p>
-                  {item.FlavorName && (
-                    <p className="text-[10px] text-gray-400">{item.FlavorName}</p>
-                  )}
-                </div>
-                <p className="text-sm font-bold text-[#14213D] flex-shrink-0">
-                  {formatPrice(item.SubTotal)}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="border-t border-gray-100 pt-4 space-y-2">

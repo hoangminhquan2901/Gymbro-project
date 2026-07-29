@@ -374,3 +374,64 @@ exports.updateCustomerStatus = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Lỗi server khi cập nhật trạng thái!' });
     }
 };
+
+// ==========================================
+// 8. API KIỂM TRA EMAIL QUÊN MẬT KHẨU
+// ==========================================
+exports.forgotPassword = async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ success: false, message: 'Vui lòng nhập email!' });
+    }
+
+    try {
+        const [users] = await db.query('SELECT UserID, Email FROM Users WHERE Email = ?', [email]);
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: 'Email này chưa được đăng ký trong hệ thống!' });
+        }
+
+        return res.status(200).json({ 
+            success: true, 
+            message: 'Email hợp lệ, vui lòng tiến hành đổi mật khẩu mới.' 
+        });
+    } catch (error) {
+        console.error('Lỗi kiểm tra email quên mật khẩu:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi kiểm tra email!' });
+    }
+};
+
+// ==========================================
+// 9. API ĐẶT LẠI MẬT KHẨU MỚI
+// ==========================================
+exports.resetPassword = async (req, res) => {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+        return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ thông tin!' });
+    }
+
+    if (newPassword.length < 8) {
+        return res.status(400).json({ success: false, message: 'Mật khẩu phải có ít nhất 8 ký tự!' });
+    }
+
+    try {
+        const [users] = await db.query('SELECT UserID FROM Users WHERE Email = ?', [email]);
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản với email này!' });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await db.query('UPDATE Users SET Password = ? WHERE Email = ?', [hashedPassword, email]);
+
+        return res.status(200).json({ 
+            success: true, 
+            message: 'Đặt lại mật khẩu thành công!' 
+        });
+    } catch (error) {
+        console.error('Lỗi đặt lại mật khẩu:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi đặt lại mật khẩu!' });
+    }
+};

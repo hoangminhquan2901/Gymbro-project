@@ -1,4 +1,3 @@
-// src/pages/Admin/Dashboard.jsx
 import React, { useState, useEffect } from "react";
 import StatCard from "../../components/Admin/StatCard";
 import RevenueChart from "../../components/Admin/RevenueChart";
@@ -22,13 +21,16 @@ export default function Dashboard() {
 
   const [topProducts, setTopProducts] = useState([]);
 
-  const loadDashboardData = () => {
+  // Chuyển hàm thành async để chờ API/Database trả về dữ liệu
+  const loadDashboardData = async () => {
     try {
       // 1. Lấy danh sách sản phẩm
-      const products = typeof getAllProducts === "function" ? getAllProducts() : [];
+      const rawProducts = typeof getAllProducts === "function" ? await getAllProducts() : [];
+      const products = Array.isArray(rawProducts) ? rawProducts : (rawProducts?.data || []);
 
       // 2. Lấy đơn hàng & Tính tổng doanh thu
-      const orders = typeof getOrders === "function" ? getOrders() : [];
+      const rawOrders = typeof getOrders === "function" ? await getOrders() : [];
+      const orders = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.data || []);
       const totalOrdersCount = orders.length;
 
       const totalRevenueSum = orders.reduce((sum, order) => {
@@ -36,14 +38,15 @@ export default function Dashboard() {
       }, 0);
 
       // 3. Lấy danh sách khách hàng
-      const customers = typeof getCustomers === "function" ? getCustomers() : [];
+      const rawCustomers = typeof getCustomers === "function" ? await getCustomers() : [];
+      const customers = Array.isArray(rawCustomers) ? rawCustomers : (rawCustomers?.data || []);
 
       // Cập nhật các thẻ KPI
       setStats({
         totalRevenue: totalRevenueSum,
         totalOrders: totalOrdersCount,
-        totalCustomers: Array.isArray(customers) ? customers.length : 0,
-        totalProducts: Array.isArray(products) ? products.length : 0,
+        totalCustomers: customers.length,
+        totalProducts: products.length,
       });
 
       // 4. Top 5 sản phẩm bán chạy
@@ -108,7 +111,7 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* 4 Thẻ KPI - Đã truyền Icon JSX Component & Bỏ thuộc tính change */}
+      {/* 4 Thẻ KPI */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           title="Tổng doanh thu"

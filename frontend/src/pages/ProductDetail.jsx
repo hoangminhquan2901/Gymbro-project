@@ -159,53 +159,40 @@ export default function ProductDetail() {
       try {
         data = JSON.parse(data);
       } catch (e) {
-        return [{ name: data, stock: 10 }];
+        return [{ id: 1, name: data, stock: 10 }];
       }
     }
 
     if (Array.isArray(data)) {
       return data.map((item, index) => {
-        if (typeof item === "string") return { name: item, stock: 10 };
+        if (typeof item === "string") return { id: index + 1, name: item, stock: 10 };
         if (typeof item === "object" && item !== null) {
           const knownName = item.name || item.flavor || item.flavorName || item.title || item.label || item.value || item.ten || item.tenHuongVi;
+          const knownId = item.FlavorID || item.flavorId || item.id || item.ID || (index + 1);
+
           if (knownName) {
             return {
+                id: Number(knownId),
                 name: String(knownName),
-
-                stock:
-                    Number(
-                        item.Stock ??
-                        item.stock ??
-                        item.Quantity ??
-                        item.quantity ??
-                        item.soLuong ??
-                        0
-                    ),
+                stock: Number(item.Stock ?? item.stock ?? item.Quantity ?? item.quantity ?? item.soLuong ?? 0),
             };
           }
           const stringValue = Object.values(item).find((val) => typeof val === "string" && val.trim() !== "");
           return {
+              id: Number(knownId),
               name: stringValue ? String(stringValue) : `Vị ${index + 1}`,
-
-              stock:
-                  Number(
-                      item.Stock ??
-                      item.stock ??
-                      item.Quantity ??
-                      item.quantity ??
-                      item.soLuong ??
-                      0
-                  ),
+              stock: Number(item.Stock ?? item.stock ?? item.Quantity ?? item.quantity ?? item.soLuong ?? 0),
           };
         }
-        return { name: String(item), stock: 10 };
+        return { id: index + 1, name: String(item), stock: 10 };
       });
     }
 
     if (typeof data === "object" && data !== null) {
-      return Object.entries(data).map(([key, val]) => {
+      return Object.entries(data).map(([key, val], index) => {
         const stockNum = typeof val === "number" ? val : val?.stock ?? 10;
-        return { name: key, stock: stockNum };
+        const flavorId = val?.FlavorID || val?.flavorId || val?.id || (index + 1);
+        return { id: Number(flavorId), name: key, stock: stockNum };
       });
     }
 
@@ -300,6 +287,9 @@ export default function ProductDetail() {
     setFlavorError(false);
 
     const flavorName = currentFlavorObj?.name || "Mặc định";
+    // Lấy chính xác FlavorID từ database (nếu không có thì mặc định là 1)
+    const flavorId = currentFlavorObj?.id || 1; 
+
     const maxStock = getSafeMaxStock();
 
     if (quantity > maxStock) {
@@ -308,19 +298,20 @@ export default function ProductDetail() {
     }
 
     try {
-      // Gọi await vì addToCart giờ đã kết nối với Backend API
+      // Truyền đầy đủ object chứa thông tin sản phẩm + hương vị
       await addToCart(
         {
           id: product.ProductID || product.id || product._id,
           name: productName,
           price: currentPrice,
-          image: productImage, // Đổi từ img -> image để đồng bộ
+          image: productImage,
           flavor: flavorName,
+          flavorId: flavorId, // 👈 ĐÃ BỔ SUNG FLAVOR ID Ở ĐÂY
           size: currentSizeObj?.label || "Tiêu chuẩn",
         },
         quantity
       );
-      alert("Đã thêm sản phẩm vào giỏ hàng!");
+      alert("Đã thêm sản phẩm vào giỏ hàng thành công!");
     } catch (err) {
       console.error("Lỗi thêm vào giỏ hàng:", err);
       alert("Không thể thêm vào giỏ hàng, vui lòng thử lại!");

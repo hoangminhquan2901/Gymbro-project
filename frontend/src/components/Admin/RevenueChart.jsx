@@ -1,4 +1,3 @@
-// src/components/Admin/RevenueChart.jsx
 import React, { useState, useEffect } from "react";
 import {
   ResponsiveContainer,
@@ -16,31 +15,30 @@ function RevenueChart() {
 
   // Hàm hỗ trợ parse Ngày tháng linh hoạt
   const parseOrderMonth = (dateStr) => {
-    if (!dateStr) return new Date().getMonth(); // Nếu không có ngày, mặc định lấy tháng hiện tại
+    if (!dateStr) return new Date().getMonth();
 
-    // 1. Thử parse dạng chuẩn ISO hoặc JS Date
     const parsedDate = new Date(dateStr);
     if (!isNaN(parsedDate.getTime())) {
       return parsedDate.getMonth();
     }
 
-    // 2. Thử parse dạng chuỗi Việt Nam "DD/MM/YYYY" hoặc "DD-MM-YYYY"
     if (typeof dateStr === "string") {
       const parts = dateStr.split(/[\/\-]/);
       if (parts.length >= 2) {
-        const month = parseInt(parts[1], 10) - 1; // Month index từ 0 -> 11
+        const month = parseInt(parts[1], 10) - 1;
         if (!isNaN(month) && month >= 0 && month < 12) {
           return month;
         }
       }
     }
 
-    return new Date().getMonth(); // Fallback về tháng hiện tại
+    return new Date().getMonth();
   };
 
-  const buildMonthlyData = () => {
+  const buildMonthlyData = async () => {
     try {
-      const orders = typeof getOrders === "function" ? getOrders() : [];
+      const rawOrders = typeof getOrders === "function" ? await getOrders() : [];
+      const orders = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.data || []);
 
       // Mảng 12 tháng
       const monthlyRevenue = Array.from({ length: 12 }, (_, index) => ({
@@ -50,16 +48,13 @@ function RevenueChart() {
       }));
 
       orders.forEach((order) => {
-        // Lấy trường ngày tháng linh hoạt
         const dateStr = order.createdAt || order.date || order.orderDate || order.created_at;
         const monthIndex = parseOrderMonth(dateStr);
         
-        // Lấy số tiền đơn hàng
         const amount = Number(order.totalAmount || order.total || order.price || order.grandTotal || 0);
 
         if (monthIndex >= 0 && monthIndex < 12) {
           monthlyRevenue[monthIndex].rawRevenue += amount;
-          // Đơn vị triệu (M), làm tròn 2 chữ số thập phân
           monthlyRevenue[monthIndex].revenue = Number(
             (monthlyRevenue[monthIndex].rawRevenue / 1000000).toFixed(2)
           );
