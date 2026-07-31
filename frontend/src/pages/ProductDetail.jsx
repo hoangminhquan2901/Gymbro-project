@@ -89,7 +89,6 @@ export default function ProductDetail() {
     (productName ? productName.split(" ")[0] : "GymBro");
 
   const rawPrice = product.Price ?? product.price ?? product.PriceSell ?? product.priceSell ?? 0;
-  const productDescription = product.Description || product.description || "Đang cập nhật mô tả cho sản phẩm này...";
   
   // Trích xuất subCategory, categoryName và categoryId theo cấu trúc mới
   const subCatName =
@@ -504,18 +503,6 @@ export default function ProductDetail() {
             </div>
           </div>
         </div>
-
-        {/* PHẦN MÔ TẢ CHI TIẾT SẢN PHẨM TỪ ADMIN */}
-        <div className="bg-white border border-[#14213D]/10 rounded-2xl p-8 mt-6 shadow-sm">
-          <h2 className="text-xl font-black text-[#14213D] uppercase mb-4 border-b pb-2 border-gray-100">
-            Mô tả sản phẩm
-          </h2>
-          <div 
-            className="text-gray-700 text-sm md:text-base leading-relaxed space-y-3"
-            dangerouslySetInnerHTML={{ __html: productDescription }}
-          />
-        </div>
-
       </div>
     </div>
   );
