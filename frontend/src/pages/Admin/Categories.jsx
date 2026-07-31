@@ -21,7 +21,7 @@ import CategoryFormModal from "../../components/Admin/CategoryFormModal";
 import CategoryDetailModal from "../../components/Admin/CategoryDetailModal";
 import DeleteModal from "../../components/Admin/DeleteModal";
 
-// 🔤 HELPER: Chuẩn hóa tiếng Việt loại bỏ dấu (Xử lý lỗi â vs ấ)
+// 🔤 HELPER: Chuẩn hóa tiếng Việt loại bỏ dấu
 const removeVietnameseTones = (str) => {
   if (!str) return "";
   return String(str)
@@ -43,12 +43,19 @@ function Categories() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all"); // 'all' | 'root' | 'sub'
 
+  // 🔥 STATE QUẢN LÝ MỞ RỘNG (EXPAND/COLLAPSE) CHO TỪNG DANH MỤC GỐC
+  const [expandedRoots, setExpandedRoots] = useState(new Set());
+
+  // 🔥 STATE PHÂN TRANG (Đã đổi limit xuống 3 danh mục gốc / trang)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(3);
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  // 🔄 1. TẢI DỮ LIỆU BẤT ĐỒNG BỘ TỪ API
+  // 🔄 1. TẢI DỮ LIỆU
   async function loadData() {
     setLoading(true);
     try {
@@ -57,7 +64,6 @@ function Categories() {
         getAllProducts ? getAllProducts() : Promise.resolve([]),
       ]);
 
-      // Xử lý dữ liệu trả về từ API dạng { success: true, count: 8, data: [...] }
       const rawCategoryList = Array.isArray(catData)
         ? catData
         : catData?.data || [];
@@ -65,18 +71,16 @@ function Categories() {
         ? prodData
         : prodData?.data || [];
 
-      // 🛠️ Tự động map ParentName từ danh sách nếu Backend chưa trả về
       const categoryList = rawCategoryList.map((cat) => {
         const pId =
           cat.ParentCategoryID ??
-          cat.parentCategoryId ??
+          cat.parentCategoryID ??
           cat.ParentID ??
           cat.parent_id;
 
         if (pId && !cat.ParentName && !cat.parentName && !cat.parent) {
           const parentObj = rawCategoryList.find(
-            (c) =>
-              Number(c.CategoryID || c.id) === Number(pId)
+            (c) => Number(c.CategoryID || c.id) === Number(pId)
           );
           if (parentObj) {
             return {
@@ -103,16 +107,19 @@ function Categories() {
     loadData();
   }, []);
 
-  // 🛠️ HELPER CHECK DANH MỤC GỐC CHUẨN THEO API BACKEND (ParentCategoryID === null)
+  // Reset trang về 1 khi tìm kiếm hoặc đổi bộ lọc
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
+
+  // 🛠️ HELPER CHECK DANH MỤC GỐC
   const isRootCategory = (item) => {
     if (!item) return false;
-
     const parentCatId =
       item.ParentCategoryID ??
       item.parentCategoryID ??
       item.ParentID ??
       item.parent_id;
-
     const parentName = item.parent ?? item.parentName ?? item.ParentName;
 
     const hasNoParentId =
@@ -121,7 +128,6 @@ function Categories() {
       parentCatId === 0 ||
       parentCatId === "" ||
       parentCatId === "0";
-
     const hasNoParentName =
       !parentName ||
       String(parentName).trim().toLowerCase() === "gốc" ||
@@ -130,7 +136,6 @@ function Categories() {
     return hasNoParentId && hasNoParentName;
   };
 
-  // --- STATS COMPUTATION ---
   const totalCategories = Array.isArray(categories) ? categories.length : 0;
   const totalProducts = Array.isArray(products) ? products.length : 0;
 
@@ -141,17 +146,15 @@ function Categories() {
 
   const subCategoriesCount = totalCategories - rootCategoriesCount;
 
-  // 🔥 2. TÍNH SỐ LƯỢNG SẢN PHẨM
+  // 🔥 2. TÍNH SỐ LƯỢNG SẢN PHẨM CHO TỪNG DANH MỤC
   const categoriesWithCount = useMemo(() => {
     if (!Array.isArray(categories)) return [];
 
     return categories.map((cat) => {
       if (!cat) return { productCount: 0 };
-
       if (typeof cat.ProductCount === "number") {
         return { ...cat, productCount: cat.ProductCount };
       }
-
       if (!Array.isArray(products)) return { ...cat, productCount: 0 };
 
       const catName = String(cat.Name || cat.name || "").trim().toLowerCase();
@@ -159,7 +162,6 @@ function Categories() {
 
       const count = products.filter((p) => {
         if (!p) return false;
-
         const isMatch = (fieldValue) => {
           if (!fieldValue) return false;
           if (typeof fieldValue === "object") {
@@ -194,80 +196,119 @@ function Categories() {
     });
   }, [categories, products]);
 
-  // 🔥 3. PHÂN CẤP VÀ LỌC DỮ LIỆU (Đã tích hợp lọc Tiếng Việt bỏ dấu)
-  const sortedCategories = useMemo(() => {
-    if (!Array.isArray(categoriesWithCount) || categoriesWithCount.length === 0)
-      return [];
+  // 🔥 3. LỌC DANH MỤC GỐC VÀ TỰ ĐỘNG MỞ RỘNG KHI TÌM KIẾM
+  const filteredRootCategories = useMemo(() => {
+    if (!Array.isArray(categoriesWithCount)) return [];
 
-    // 🎯 Lọc theo từ khóa tìm kiếm KHÔNG PHÂN BIỆT DẤU TIẾNG VIỆT
+    const roots = categoriesWithCount.filter((item) => isRootCategory(item));
     const normalizedSearch = removeVietnameseTones(searchTerm);
-    let filtered = categoriesWithCount.filter((item) => {
-      if (!item) return false;
-      const itemName = removeVietnameseTones(item.Name || item.name || "");
-      return itemName.includes(normalizedSearch);
-    });
 
-    // Lọc theo loại danh mục (Gốc / Con)
-    if (filterType === "root") {
-      filtered = filtered.filter((item) => isRootCategory(item));
-    } else if (filterType === "sub") {
-      filtered = filtered.filter((item) => !isRootCategory(item));
+    if (!normalizedSearch) {
+      if (filterType === "root") return roots;
+      if (filterType === "sub") return [];
+      return roots;
     }
 
-    if (filterType !== "all") return filtered;
+    return roots.filter((root) => {
+      const rootId = String(root.CategoryID || root.id || "");
+      const rootName = String(root.Name || root.name || "");
+      const rootNameNorm = removeVietnameseTones(rootName);
 
-    // Sắp xếp phân cấp cho chế độ xem tất cả ('all')
-    const roots = filtered.filter((item) => isRootCategory(item));
-
-    const result = [];
-    roots.forEach((rootItem) => {
-      result.push(rootItem);
-
-      const rootName = String(rootItem.Name || rootItem.name || "")
-        .trim()
-        .toLowerCase();
-      const rootId = String(rootItem.CategoryID || rootItem.id || "").trim();
-
-      const children = filtered.filter((subItem) => {
-        if (!subItem || isRootCategory(subItem)) return false;
-
+      const children = categoriesWithCount.filter((sub) => {
+        if (!sub || isRootCategory(sub)) return false;
         const subParentId = String(
-          subItem.ParentCategoryID ??
-            subItem.parentCategoryID ??
-            subItem.ParentID ??
-            ""
+          sub.ParentCategoryID ?? sub.parentCategoryID ?? sub.ParentID ?? ""
         ).trim();
-
         const subParentName = String(
-          subItem.parent ?? subItem.parentName ?? subItem.ParentName ?? ""
+          sub.parent ?? sub.parentName ?? sub.ParentName ?? ""
         )
           .trim()
           .toLowerCase();
-
         return (
           subParentId === rootId ||
-          subParentName === rootName
+          subParentName === rootName.trim().toLowerCase()
         );
       });
 
-      result.push(...children);
-    });
+      const rootMatches = rootNameNorm.includes(normalizedSearch);
+      const childMatches = children.some((sub) =>
+        removeVietnameseTones(sub.Name || sub.name || "").includes(
+          normalizedSearch
+        )
+      );
 
-    // Đưa các danh mục con chưa được xếp vào cây xuống cuối
-    filtered.forEach((item) => {
-      const itemId = item.CategoryID || item.id;
-      if (!result.some((r) => (r.CategoryID || r.id) === itemId)) {
-        result.push(item);
-      }
+      return rootMatches || childMatches;
     });
-
-    return result;
   }, [categoriesWithCount, searchTerm, filterType]);
 
-  // 🗑️ 4. XỬ LÝ XÓA DANH MỤC QUA API
+  // Tự động mở rộng danh mục gốc khi tìm kiếm khớp danh mục con
+  useEffect(() => {
+    if (searchTerm.trim()) {
+      const normalizedSearch = removeVietnameseTones(searchTerm);
+      const matchedRootIds = new Set();
+
+      categoriesWithCount.forEach((root) => {
+        if (!isRootCategory(root)) return;
+        const rootId = String(root.CategoryID || root.id || "");
+        const rootName = String(root.Name || root.name || "");
+        const rootNameNorm = removeVietnameseTones(rootName);
+
+        const children = categoriesWithCount.filter((sub) => {
+          if (!sub || isRootCategory(sub)) return false;
+          const subParentId = String(
+            sub.ParentCategoryID ?? sub.parentCategoryID ?? sub.ParentID ?? ""
+          ).trim();
+          const subParentName = String(
+            sub.parent ?? sub.parentName ?? sub.ParentName ?? ""
+          )
+            .trim()
+            .toLowerCase();
+          return (
+            subParentId === rootId ||
+            subParentName === rootName.trim().toLowerCase()
+          );
+        });
+
+        const rootMatches = rootNameNorm.includes(normalizedSearch);
+        const childMatches = children.some((sub) =>
+          removeVietnameseTones(sub.Name || sub.name || "").includes(
+            normalizedSearch
+          )
+        );
+
+        if (rootMatches || childMatches) {
+          matchedRootIds.add(rootId);
+        }
+      });
+      setExpandedRoots(matchedRootIds);
+    } else {
+      setExpandedRoots(new Set());
+    }
+  }, [searchTerm, categoriesWithCount]);
+
+  const handleToggleExpand = (rootId) => {
+    setExpandedRoots((prev) => {
+      const next = new Set(prev);
+      if (next.has(rootId)) {
+        next.delete(rootId);
+      } else {
+        next.add(rootId);
+      }
+      return next;
+    });
+  };
+
+  // 🔥 4. PHÂN TRANG TRÊN DANH MỤC GỐC
+  const totalPages = Math.ceil(filteredRootCategories.length / pageSize) || 1;
+
+  const paginatedRootCategories = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredRootCategories.slice(start, start + pageSize);
+  }, [filteredRootCategories, currentPage, pageSize]);
+
+  // 🗑️ 5. XÓA DANH MỤC
   const handleDeleteConfirm = async () => {
     if (!selectedCategory) return;
-
     const categoryId = selectedCategory.CategoryID || selectedCategory.id;
     const categoryName = selectedCategory.Name || selectedCategory.name;
 
@@ -307,7 +348,7 @@ function Categories() {
             Quản lý danh mục
           </h1>
           <p className="text-xs text-gray-500 mt-1">
-            Xây dựng và tổ chức cây cấu trúc phân loại sản phẩm toàn hệ thống
+            Giao diện gọn gàng với tính năng thu gọn/mở rộng danh mục gốc linh hoạt
           </p>
         </div>
 
@@ -320,9 +361,8 @@ function Categories() {
         </button>
       </div>
 
-      {/* 2. THẺ THỐNG KÊ (REAL-TIME STAT CARDS) */}
+      {/* 2. THẺ THỐNG KÊ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        {/* Total Categories Card */}
         <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md transition">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
@@ -340,7 +380,6 @@ function Categories() {
           </div>
         </div>
 
-        {/* Total Products Card */}
         <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md transition">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
@@ -360,7 +399,6 @@ function Categories() {
           </div>
         </div>
 
-        {/* Hierarchy Root vs Sub Card */}
         <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md transition">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
@@ -375,22 +413,21 @@ function Categories() {
               <span className="text-2xl font-bold text-[#14213D]">
                 {rootCategoriesCount}
               </span>
-              <span className="text-xs text-gray-400 ml-1">Danh mục gốc</span>
+              <span className="text-xs text-gray-400 ml-1">Gốc</span>
             </div>
             <div className="h-6 w-px bg-gray-200" />
             <div>
               <span className="text-2xl font-bold text-[#14213D]">
                 {subCategoriesCount}
               </span>
-              <span className="text-xs text-gray-400 ml-1">Danh mục con</span>
+              <span className="text-xs text-gray-400 ml-1">Con</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 3. KHU VỰC BẢNG VÀ BỘ LỌC TÌM KIẾM */}
+      {/* 3. KHU VỰC BẢNG & BỘ LỌC */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {/* Toolbar Header */}
         <div className="p-5 border-b border-gray-100 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-white">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
             {/* Search Input */}
@@ -401,7 +438,7 @@ function Categories() {
               />
               <input
                 type="text"
-                placeholder="Tìm danh mục theo tên..."
+                placeholder="Tìm danh mục Gốc hoặc Con..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-9 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl outline-none focus:bg-white focus:border-[#FCA311] focus:ring-2 focus:ring-[#FCA311]/20 transition"
@@ -426,33 +463,75 @@ function Categories() {
                     : "text-gray-500 hover:text-gray-800"
                 }`}
               >
-                Tất cả ({totalCategories})
-              </button>
-              <button
-                onClick={() => setFilterType("root")}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  filterType === "root"
-                    ? "bg-white text-[#14213D] shadow-xs"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
-              >
-                Gốc ({rootCategoriesCount})
-              </button>
-              <button
-                onClick={() => setFilterType("sub")}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                  filterType === "sub"
-                    ? "bg-white text-[#14213D] shadow-xs"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
-              >
-                Danh mục con ({subCategoriesCount})
+                Tất cả gốc ({rootCategoriesCount})
               </button>
             </div>
           </div>
         </div>
 
-        {/* Loading State / Category Table */}
+        {/* 🔥 THANH PHÂN TRANG ĐẶT Ở PHÍA TRÊN */}
+        {!loading && filteredRootCategories.length > 0 && (
+          <div className="px-5 py-3 bg-gray-50/80 border-b border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-500">
+            <div className="flex items-center gap-1.5">
+              <span className="mr-2 font-medium">
+                Trang <strong className="text-[#14213D]">{currentPage}</strong> /{" "}
+                {totalPages}
+              </span>
+
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer shadow-xs"
+              >
+                Trước
+              </button>
+
+              <div className="hidden sm:flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((page) => {
+                    return (
+                      page === 1 ||
+                      page === totalPages ||
+                      Math.abs(page - currentPage) <= 1
+                    );
+                  })
+                  .map((page, index, array) => {
+                    const previousPage = array[index - 1];
+                    const showEllipsis = previousPage && page - previousPage > 1;
+                    return (
+                      <React.Fragment key={page}>
+                        {showEllipsis && (
+                          <span className="px-1 text-gray-400">...</span>
+                        )}
+                        <button
+                          onClick={() => setCurrentPage(page)}
+                          className={`w-8 h-8 rounded-lg font-semibold transition cursor-pointer shadow-xs ${
+                            currentPage === page
+                              ? "bg-[#FCA311] text-white"
+                              : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+              </div>
+
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer shadow-xs"
+              >
+                Sau
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Loading / Table Component */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <Loader2 size={32} className="animate-spin text-[#FCA311] mb-2" />
@@ -460,7 +539,11 @@ function Categories() {
           </div>
         ) : (
           <CategoryTable
-            categories={sortedCategories}
+            roots={paginatedRootCategories}
+            allCategories={categoriesWithCount}
+            expandedRoots={expandedRoots}
+            onToggleExpand={handleToggleExpand}
+            loading={loading}
             onDetail={(item) => {
               setSelectedCategory(item);
               setShowDetailModal(true);
@@ -477,7 +560,7 @@ function Categories() {
         )}
 
         {/* Empty State */}
-        {!loading && sortedCategories.length === 0 && (
+        {!loading && filteredRootCategories.length === 0 && (
           <div className="text-center py-16 px-4">
             <div className="w-12 h-12 rounded-full bg-amber-50 text-[#FCA311] flex items-center justify-center mx-auto mb-3">
               <FolderTree size={24} />
@@ -505,7 +588,7 @@ function Categories() {
         )}
       </div>
 
-      {/* 4. MODALS CONTAINER */}
+      {/* MODALS */}
       <CategoryFormModal
         open={showAddModal}
         mode="add"

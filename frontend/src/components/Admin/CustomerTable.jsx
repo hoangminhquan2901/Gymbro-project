@@ -1,26 +1,20 @@
 import React from "react";
-import { Eye, ShoppingBag, UserCheck } from "lucide-react";
+import { Eye, ShoppingBag, UserCheck, ChevronLeft, ChevronRight } from "lucide-react";
 
-export default function CustomerTable({ customers, onViewDetail, onToggleStatus }) {
-  // Lọc chỉ lấy những người dùng là Khách hàng (Role CUSTOMER / USER hoặc không khai báo)
+export default function CustomerTable({ 
+  customers, 
+  onViewDetail, 
+  onToggleStatus,
+  currentPage,
+  totalPages,
+  totalItems,
+  limit,
+  onPageChange
+}) {
   const registeredCustomers = (customers || []).filter(
     (cus) => !cus.role || ["CUSTOMER", "USER", "KHÁCH HÀNG"].includes(cus.role.toUpperCase())
   );
 
-  const getTierBadge = (tier) => {
-    switch (tier?.toUpperCase()) {
-      case "VIP":
-        return "bg-purple-100 text-purple-700 border border-purple-200/60";
-      case "GOLD":
-        return "bg-amber-100 text-amber-700 border border-amber-200/60";
-      case "SILVER":
-        return "bg-blue-100 text-blue-700 border border-blue-200/60";
-      default:
-        return "bg-emerald-100 text-emerald-700 border border-emerald-200/60";
-    }
-  };
-
-  // Cập nhật hàm kiểm tra IsActive hỗ trợ cả kiểu Number (1/0) từ MySQL
   const checkIsActive = (cus) => {
     const val = cus.isActive !== undefined ? cus.isActive : cus.status;
     if (val === 1 || val === true || val === "1") return true;
@@ -30,8 +24,17 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
     return statusStr === "hoạt động" || statusStr === "active" || statusStr === "true";
   };
 
+  // Tạo mảng danh sách các số trang hiển thị
+  const getPageNumbers = () => {
+    const pages = [];
+    for (let i = 1; i <= totalPages; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -58,7 +61,6 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
 
                 return (
                   <tr key={displayId} className="hover:bg-gray-50/50 transition-colors group">
-                    {/* Thông tin khách hàng */}
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div>
@@ -75,20 +77,17 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
                       </div>
                     </td>
 
-                    {/* Liên hệ */}
                     <td className="py-4 px-6">
                       <p className="text-gray-800 font-medium">{cus.email || "N/A"}</p>
                       <p className="text-xs text-gray-400">{displayPhone}</p>
                     </td>
 
-                    {/* Cấp độ */}
                     <td className="py-4 px-6">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide ${getTierBadge(cus.tier)}`}>
+                      <span className="px-3 py-1 rounded-full text-xs font-bold tracking-wide bg-emerald-100 text-emerald-700 border border-emerald-200/60">
                         {cus.tier || "Bronze"}
                       </span>
                     </td>
 
-                    {/* Số lượng đơn hàng */}
                     <td className="py-4 px-6 font-semibold text-gray-700">
                       <div className="flex items-center gap-1.5">
                         <ShoppingBag size={14} className="text-gray-400" />
@@ -96,39 +95,23 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
                       </div>
                     </td>
 
-                    {/* Tổng chi tiêu */}
                     <td className="py-4 px-6 font-bold text-emerald-600">
                       {totalSpent.toLocaleString("vi-VN")}đ
                     </td>
 
-                    {/* Đơn hàng cuối / Ngày đăng ký */}
                     <td className="py-4 px-6 text-gray-500 text-xs">
-                      {cus.lastOrderDate ? (
-                        cus.lastOrderDate
-                      ) : (
-                        <span className="text-gray-400 italic">Chưa mua hàng</span>
-                      )}
+                      {cus.lastOrderDate ? cus.lastOrderDate : <span className="text-gray-400 italic">Chưa mua hàng</span>}
                     </td>
 
-                    {/* Trạng thái */}
                     <td className="py-4 px-6">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                          isActive
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200/50"
-                            : "bg-red-50 text-red-700 border border-red-200/50"
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            isActive ? "bg-emerald-500 animate-pulse" : "bg-red-500"
-                          }`}
-                        />
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                        isActive ? "bg-emerald-50 text-emerald-700 border border-emerald-200/50" : "bg-red-50 text-red-700 border border-red-200/50"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
                         {isActive ? "Hoạt động" : "Tạm khóa"}
                       </span>
                     </td>
 
-                    {/* Thao tác */}
                     <td className="py-4 px-6 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button
@@ -141,7 +124,7 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
                         <select
                           value={isActive ? "1" : "0"}
                           onChange={(e) => onToggleStatus && onToggleStatus(displayId, Number(e.target.value))}
-                          className="text-xs border border-gray-200 rounded-xl px-2.5 py-1.5 bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#0B132B]/20 focus:border-[#0B132B] cursor-pointer shadow-xs"
+                          className="text-xs border border-gray-200 rounded-xl px-2.5 py-1.5 bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#0B132B]/20 cursor-pointer shadow-xs"
                         >
                           <option value="1">Hoạt động</option>
                           <option value="0">Tạm khóa</option>
@@ -156,14 +139,59 @@ export default function CustomerTable({ customers, onViewDetail, onToggleStatus 
                 <td colSpan="8" className="text-center py-12 text-gray-400">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <UserCheck size={36} className="text-gray-300" />
-                    <p className="text-sm font-medium">Chưa có khách hàng nào đăng ký tài khoản.</p>
-                    <p className="text-xs text-gray-400">Danh sách sẽ tự động cập nhật khi có người dùng mới tạo tài khoản.</p>
+                    <p className="text-sm font-medium">Không tìm thấy khách hàng nào.</p>
                   </div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Thanh Phân Trang Offset-Based (Số trang) */}
+      <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/30 gap-4">
+        <div className="text-xs text-gray-500">
+          Hiển thị từ <span className="font-semibold text-gray-700">{totalItems === 0 ? 0 : (currentPage - 1) * limit + 1}</span> đến{" "}
+          <span className="font-semibold text-gray-700">{Math.min(currentPage * limit, totalItems)}</span> trong tổng số{" "}
+          <span className="font-semibold text-gray-700">{totalItems}</span> khách hàng
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {/* Nút Trước */}
+          <button
+            onClick={() => onPageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+          >
+            <ChevronLeft size={14} /> Trước
+          </button>
+
+          {/* Các nút số trang */}
+          <div className="flex items-center gap-1">
+            {getPageNumbers().map((num) => (
+              <button
+                key={num}
+                onClick={() => onPageChange(num)}
+                className={`w-8 h-8 text-xs font-semibold rounded-lg transition-colors ${
+                  currentPage === num
+                    ? "bg-[#0B132B] text-white shadow-xs"
+                    : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
+
+          {/* Nút Sau */}
+          <button
+            onClick={() => onPageChange(currentPage + 1)}
+            disabled={currentPage === totalPages || totalPages === 0}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+          >
+            Sau <ChevronRight size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );

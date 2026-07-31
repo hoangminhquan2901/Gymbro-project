@@ -151,14 +151,15 @@ function Brands() {
   const handleToggleStatus = async (id, currentStatus) => {
     const nextStatus = currentStatus === "active" ? "hidden" : "active";
     
-    const currentBrand = brands.find((b) => (b.id === id || b.BrandID === id));
+    // Tìm chính xác brand dựa trên cả 2 trường ID có thể có
+    const currentBrand = brands.find((b) => (b?.BrandID ?? b?.id) === id);
     if (!currentBrand) return;
 
     try {
       const brandId = currentBrand.BrandID ?? currentBrand.id;
       await updateBrand(brandId, { ...currentBrand, Status: nextStatus, status: nextStatus });
 
-      if (selectedBrand && (selectedBrand.id === id || selectedBrand.BrandID === id)) {
+      if (selectedBrand && ((selectedBrand?.BrandID ?? selectedBrand?.id) === id)) {
         setSelectedBrand((prev) => (prev ? { ...prev, Status: nextStatus, status: nextStatus } : null));
       }
       loadBrands();
@@ -177,8 +178,9 @@ function Brands() {
   const handleConfirmDelete = async () => {
     if (!selectedBrand) return;
 
-    const brandId = selectedBrand.BrandID || selectedBrand.id;
-    const brandName = selectedBrand.Name || selectedBrand.name;
+    // Chuẩn hóa lấy ID và Tên an toàn tuyệt đối
+    const brandId = selectedBrand?.BrandID ?? selectedBrand?.id;
+    const brandName = selectedBrand?.Name ?? selectedBrand?.name;
 
     try {
       setIsDeleting(true);

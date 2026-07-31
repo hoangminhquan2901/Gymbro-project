@@ -14,27 +14,29 @@ const getLocalOrders = () => {
 };
 
 // 1. LẤY TOÀN BỘ ĐƠN HÀNG CHO ADMIN
-export const getOrders = async () => {
+export const getOrders = async (page = 1, limit = 10) => {
   try {
-    // Tự động gắn Token từ localStorage
     const token = localStorage.getItem("token") || localStorage.getItem("accessToken");
     
-    // Gọi đúng endpoint dành cho Admin ở Backend
-    const response = await axiosClient.get("/orders/admin/all", {
+    const response = await axiosClient.get(`/orders/admin/all?page=${page}&limit=${limit}`, {
       headers: {
         Authorization: `Bearer ${token}`
       }
     });
 
-    // Backend trả về dạng: { success: true, data: [...] }
+    // Trả về toàn bộ response data để phía Page lấy được cả phần pagination
     if (response.data && response.data.success) {
-      return response.data.data;
+      return response.data; 
     }
-    if (Array.isArray(response.data)) return response.data;
-    return [];
+    return response.data;
   } catch (error) {
     console.warn("Lỗi khi kết nối API /orders/admin/all, đang dùng dữ liệu LocalStorage dự phòng.", error);
-    return getLocalOrders();
+    const local = getLocalOrders();
+    return {
+      success: true,
+      data: local,
+      pagination: { currentPage: 1, totalPages: 1, totalItems: local.length }
+    };
   }
 };
 

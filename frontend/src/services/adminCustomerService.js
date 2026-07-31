@@ -1,32 +1,30 @@
 import axios from "axios";
 
-// Đổi API_URL bao gồm cả prefix /auth
 const API_URL = "http://localhost:5000/api/auth";
 
-export const getCustomers = async () => {
+export const getCustomers = async (page = 1, limit = 10) => {
   try {
-    const response = await axios.get(`${API_URL}/admin/customers`, {
+    const response = await axios.get(`${API_URL}/admin/customers?page=${page}&limit=${limit}`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem("admin_token")}` 
       }
     });
     
     if (response.data && response.data.success) {
-      return response.data.data;
+      return response.data; // Trả về cả { success, data, pagination }
     }
-    return [];
+    return { data: [], pagination: {} };
   } catch (error) {
     console.error("Lỗi khi tải danh sách khách hàng từ Database:", error);
-    return [];
+    return { data: [], pagination: {} };
   }
 };
 
-// 2. Cập nhật trạng thái khách hàng (Khóa / Hoạt động)
 export const updateCustomerStatus = async (customerId, status) => {
   try {
     const response = await axios.put(
       `${API_URL}/admin/customers/${customerId}/status`,
-      { status }, // status gửi lên backend: 1 (hoạt động) hoặc 0 (khóa)
+      { status },
       {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("admin_token")}`

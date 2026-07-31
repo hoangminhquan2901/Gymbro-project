@@ -8,15 +8,22 @@ export default function Orders() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // State phân trang Admin
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const limit = 12; // Số lượng đơn hàng trên mỗi trang của admin
+
   // Hàm tải dữ liệu bất đồng bộ từ API / Database
-  const loadData = async () => {
+  const loadData = async (page = 1) => {
     try {
       setLoading(true);
-      const data = await getOrders();
+      const res = dataTypeSafely(await getOrders(page, limit));
       
-      // Đảm bảo dữ liệu nhận được luôn là mảng an toàn
-      const orderList = Array.isArray(data) ? data : (data?.data || data?.orders || []);
-      setOrders(orderList);
+      setOrders(res.orders);
+      setCurrentPage(res.pagination.currentPage);
+      setTotalPages(res.pagination.totalPages);
+      setTotalItems(res.pagination.totalItems);
     } catch (error) {
       console.error("Lỗi khi tải danh sách đơn hàng:", error);
     } finally {
@@ -24,22 +31,37 @@ export default function Orders() {
     }
   };
 
-  useEffect(() => {
-    loadData();
+  // Helper bóc tách dữ liệu linh hoạt đề phòng fallback localStorage
+  const dataTypeSafely = (data) => {
+    if (data && data.success && Array.isArray(data.data)) {
+      return {
+        orders: data.data,
+        pagination: data.pagination || { currentPage: 1, totalPages: 1, totalItems: data.data.length }
+      };
+    }
+    const list = Array.isArray(data) ? data : (data?.data || data?.orders || []);
+    return {
+      orders: list,
+      pagination: { currentPage: 1, totalPages: 1, totalItems: list.length }
+    };
+  };
 
-    // Lắng nghe sự kiện cập nhật đơn hàng từ các phần khác trong ứng dụng
-    window.addEventListener('ordersChanged', loadData);
+  useEffect(() => {
+    loadData(currentPage);
+
+    // Lắng nghe sự kiện cập nhật đơn hàng
+    window.addEventListener('ordersChanged', () => loadData(currentPage));
 
     return () => {
-      window.removeEventListener('ordersChanged', loadData);
+      window.removeEventListener('ordersChanged', () => loadData(currentPage));
     };
-  }, []);
+  }, [currentPage]);
 
   // Hàm xử lý cập nhật trạng thái đơn hàng linh hoạt
   const handleUpdateStatus = async (orderId, newStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus);
-      await loadData(); // Reload lại danh sách mới nhất từ server
+      await loadData(currentPage); 
     } catch (error) {
       alert("Cập nhật trạng thái đơn hàng thất bại!");
       console.error(error);
@@ -51,7 +73,7 @@ export default function Orders() {
     if (window.confirm(`Bạn có chắc chắn muốn xóa đơn hàng #${orderId}?`)) {
       try {
         await deleteOrder(orderId);
-        await loadData(); // Reload lại danh sách sau khi xóa thành công
+        await loadData(currentPage); 
       } catch (error) {
         alert("Xóa đơn hàng thất bại!");
         console.error(error);
@@ -64,14 +86,14 @@ export default function Orders() {
       {/* Header */}
       <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-[#14213D] tracking-tight">Quản lý Đơn hàng</h1>
+          <h1 className="text-2xl font-black text-[#14213D] tracking-tight">Quản lý Đơn hàng ({totalItems})</h1>
           <p className="text-xs text-gray-500 mt-1">
             Theo dõi đơn hàng, cập nhật trạng thái giao hàng và kiểm tra thanh toán theo thời gian thực.
           </p>
         </div>
       </div>
 
-      {/* Component Bảng đơn hàng & Mini Dashboard */}
+      {/* Component Bảng đơn hàng & Phân trang */}
       {loading ? (
         <div className="bg-white rounded-2xl p-12 text-center text-gray-500 font-medium shadow-sm">
           <div className="inline-block w-8 h-8 border-4 border-[#14213D] border-t-transparent rounded-full animate-spin mb-3"></div>
@@ -83,6 +105,10 @@ export default function Orders() {
           onUpdateStatus={handleUpdateStatus}
           onDeleteOrder={handleDelete}
           onViewDetail={(id) => setSelectedOrderId(id)}
+          // Truyền thông tin và hàm đổi trang xuống bảng
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={(newPage) => setCurrentPage(newPage)}
         />
       )}
 
@@ -92,7 +118,7 @@ export default function Orders() {
           orderId={selectedOrderId}
           onClose={() => {
             setSelectedOrderId(null);
-            loadData(); // Cập nhật lại danh sách khi đóng modal
+            loadData(currentPage); 
           }}
         />
       )}

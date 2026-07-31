@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 
-export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder, onViewDetail }) {
+export default function OrderTable({ 
+  orders = [], 
+  onUpdateStatus, 
+  onDeleteOrder, 
+  onViewDetail, 
+  currentPage = 1, 
+  totalPages = 1, 
+  onPageChange 
+}) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
@@ -188,7 +196,7 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
           {(searchTerm || statusFilter !== 'ALL' || paymentFilter !== 'ALL') && (
             <button
               onClick={() => { setSearchTerm(''); setStatusFilter('ALL'); setPaymentFilter('ALL'); }}
-              className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+              className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
             >
               🔄 Xóa lọc
             </button>
@@ -196,7 +204,7 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
         </div>
       </div>
 
-      {/* Bảng Dữ liệu */}
+      {/* Bảng Dữ liệu & Phân trang */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100/80 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
@@ -313,6 +321,33 @@ export default function OrderTable({ orders = [], onUpdateStatus, onDeleteOrder,
             </tbody>
           </table>
         </div>
+
+        {/* Thanh Phân Trang (Trước / Sau) */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+            <span className="text-xs text-gray-500 font-medium">
+              Trang <strong className="text-[#14213D]">{currentPage}</strong> / {totalPages}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onPageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition shadow-sm cursor-pointer"
+              >
+                Trước
+              </button>
+
+              <button
+                onClick={() => onPageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 text-xs font-bold rounded-xl border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition shadow-sm cursor-pointer"
+              >
+                Sau
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

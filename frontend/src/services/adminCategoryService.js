@@ -2,10 +2,10 @@ import axiosClient from "./axiosClient";
 import { logActivity } from "../utils/activityLogger";
 
 // 1. Lấy tất cả danh mục
-export async function getAllCategories() {
+export async function getAllCategories(page = 1, limit = 10) {
   try {
-    const response = await axiosClient.get("/categories");
-    return response.data;
+    const response = await axiosClient.get(`/categories?page=${page}&limit=${limit}`);
+    return response.data; // Trả về { success, count, data, pagination }
   } catch (error) {
     console.error("Lỗi khi tải danh sách danh mục:", error);
     throw error;

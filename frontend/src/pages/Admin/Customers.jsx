@@ -12,67 +12,73 @@ export default function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 1. Tải danh sách khách hàng từ API
-  useEffect(() => {
-    const fetchCustomerData = async () => {
-      try {
-        setLoading(true);
-        const data = await getCustomers();
-        setCustomers(data || []);
-      } catch (error) {
-        console.error("Lỗi tải danh sách khách hàng:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  // States phân trang
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const limit = 10; // Số lượng hiển thị mỗi trang
 
-    fetchCustomerData();
-  }, []);
+  // 1. Tải danh sách khách hàng từ API theo số trang
+  const fetchCustomerData = async (page) => {
+    try {
+      setLoading(true);
+      const res = await getCustomers(page, limit);
+      setCustomers(res.data || []);
+      if (res.pagination) {
+        setCurrentPage(res.pagination.currentPage);
+        setTotalPages(res.pagination.totalPages);
+        setTotalItems(res.pagination.totalItems);
+      }
+    } catch (error) {
+      console.error("Lỗi tải danh sách khách hàng:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomerData(currentPage);
+  }, [currentPage]);
 
   // 2. Cập nhật trạng thái
   const handleToggleStatus = async (id, newStatus) => {
-  try {
-    // newStatus truyền vào: 1 (hoạt động) hoặc 0 (khóa)
-    const res = await updateCustomerStatus(id, newStatus);
-    
-    if (res && res.success) {
-      // Cập nhật lại mảng customers trong state mà không làm mất danh sách
-      setCustomers((prevCustomers) =>
-        prevCustomers.map((cus) =>
-          cus.id === id ? { ...cus, status: newStatus } : cus
-        )
-      );
+    try {
+      const res = await updateCustomerStatus(id, newStatus);
+      
+      if (res && res.success) {
+        setCustomers((prevCustomers) =>
+          prevCustomers.map((cus) =>
+            cus.id === id ? { ...cus, status: newStatus } : cus
+          )
+        );
 
-      // Nếu đang mở popup Modal của khách hàng này thì cập nhật luôn
-      if (selectedCustomer && selectedCustomer.id === id) {
-        setSelectedCustomer((prev) => ({ ...prev, status: newStatus }));
+        if (selectedCustomer && selectedCustomer.id === id) {
+          setSelectedCustomer((prev) => ({ ...prev, status: newStatus }));
+        }
       }
+    } catch (error) {
+      console.error("Không thể thay đổi trạng thái:", error);
     }
-  } catch (error) {
-    console.error("Không thể thay đổi trạng thái:", error);
-  }
-};
+  };
 
-  // 3. Bộ lọc linh hoạt tương thích cả PascalCase (MySQL) và camelCase (JS)
+  // 3. Bộ lọc cục bộ trên trang hiện tại
   const filteredCustomers = customers.filter((cus) => {
-  const matchSearch =
-    !searchTerm ||
-    (cus.name && cus.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (cus.email && cus.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (cus.phone && cus.phone.includes(searchTerm));
+    const matchSearch =
+      !searchTerm ||
+      (cus.name && cus.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (cus.email && cus.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (cus.phone && cus.phone.includes(searchTerm));
 
-  const matchTier = selectedTier === "All" || cus.tier === selectedTier;
+    const matchTier = selectedTier === "All" || cus.tier === selectedTier;
+    const isActived = cus.status === 1 || cus.status === true || cus.status === "1";
 
-  // MySQL trả về 1 là active, 0 là locked
-  const isActived = cus.status === 1 || cus.status === true || cus.status === "1";
+    const matchStatus =
+      selectedStatus === "All" ||
+      (selectedStatus === "Active" && isActived) ||
+      (selectedStatus === "Locked" && !isActived);
 
-  const matchStatus =
-    selectedStatus === "All" ||
-    (selectedStatus === "Active" && isActived) ||
-    (selectedStatus === "Locked" && !isActived);
-
-  return matchSearch && matchTier && matchStatus;
-});
+    return matchSearch && matchTier && matchStatus;
+  });
 
   return (
     <div className="p-8 max-w-[1400px] mx-auto min-h-screen bg-gray-50/50">
@@ -80,7 +86,7 @@ export default function Customers() {
         <div>
           <h1 className="text-2xl font-bold text-[#0B132B] tracking-tight">Quản lý Khách hàng</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Quản lý thông tin khách hàng từ Database
+            Quản lý thông tin khách hàng từ Database (Tổng số: {totalItems} khách hàng)
           </p>
         </div>
       </div>
@@ -96,6 +102,11 @@ export default function Customers() {
             customers={filteredCustomers}
             onViewDetail={(cus) => setSelectedCustomer(cus)}
             onToggleStatus={handleToggleStatus}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            limit={limit}
+            onPageChange={(newPage) => setCurrentPage(newPage)}
           />
         )}
       </div>
