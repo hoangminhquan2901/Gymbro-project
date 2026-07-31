@@ -132,7 +132,7 @@ function Brands() {
           cao sức khỏe, phát triển thể hình và cải thiện hiệu suất tập luyện.
         </p>
 
-        <div className="sticky top-[135px] z-30 bg-[#E5E5E5] border-y border-gray-300/80 py-3 mb-12 transition-all duration-200">
+        <div className="sticky top-[130px] z-30 bg-[#E5E5E5] border-y border-gray-300/80 py-3 mb-12 transition-all duration-200">
           <div className="max-w-[1400px] mx-auto">
             <div className="text-xs text-gray-400 mb-3 uppercase tracking-wider">
               Hiển thị <span className="font-bold text-gray-600">{totalBrands}</span> thương hiệu
