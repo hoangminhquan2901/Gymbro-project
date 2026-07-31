@@ -4,34 +4,80 @@ const createSlug = require('../utils/slug');
 // 1. Lấy danh sách tất cả danh mục
 exports.getAllCategories = async (req, res) => {
     try {
-        const sql = `
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 1. Đếm tổng số lượng danh mục gốc (ParentCategoryID IS NULL)
+        const countSql = `SELECT COUNT(*) as total FROM Categories WHERE ParentCategoryID IS NULL`;
+        const [countResult] = await db.query(countSql);
+        const totalItems = countResult[0].total;
+        const totalPages = Math.ceil(totalItems / limit) || 1;
+
+        // 2. Lấy danh sách danh mục gốc theo trang hiện tại (có tính ProductCount)
+        const rootSql = `
             SELECT 
-                c.CategoryID, 
-                c.Name, 
-                c.Slug, 
-                c.ParentCategoryID, 
-                c.Description, 
-                c.Image, 
-                c.CreatedAt, 
-                c.UpdatedAt,
+                c.CategoryID, c.Name, c.Slug, c.ParentCategoryID, 
+                c.Description, c.Image, c.CreatedAt, c.UpdatedAt,
                 COUNT(DISTINCT p.ProductID) AS ProductCount
             FROM Categories c
-            LEFT JOIN Products p 
-                ON p.CategoryID = c.CategoryID 
-                OR p.SubCategoryID = c.CategoryID
+            LEFT JOIN Products p ON p.CategoryID = c.CategoryID OR p.SubCategoryID = c.CategoryID
+            WHERE c.ParentCategoryID IS NULL
             GROUP BY c.CategoryID
             ORDER BY c.CreatedAt DESC
+            LIMIT ? OFFSET ?
         `;
+        const [rootRows] = await db.query(rootSql, [Number(limit), Number(offset)]);
 
-        const [rows] = await db.query(sql);
+        if (rootRows.length === 0) {
+            return res.json({
+                success: true,
+                count: 0,
+                data: [],
+                pagination: { currentPage: page, limit, totalItems: 0, totalPages: 0 }
+            });
+        }
+
+        // Lấy danh sách các ID của danh mục gốc ở trang này
+        const rootIds = rootRows.map(r => r.CategoryID);
+
+        // 3. Lấy toàn bộ danh mục con thuộc các danh mục gốc ở trang này
+        const placeholders = rootIds.map(() => '?').join(',');
+        const childrenSql = `
+            SELECT 
+                c.CategoryID, c.Name, c.Slug, c.ParentCategoryID, 
+                c.Description, c.Image, c.CreatedAt, c.UpdatedAt,
+                COUNT(DISTINCT p.ProductID) AS ProductCount
+            FROM Categories c
+            LEFT JOIN Products p ON p.CategoryID = c.CategoryID OR p.SubCategoryID = c.CategoryID
+            WHERE c.ParentCategoryID IN (${placeholders})
+            GROUP BY c.CategoryID
+            ORDER BY c.CreatedAt ASC
+        `;
+        const [childRows] = await db.query(childrenSql, rootIds);
+
+        // 4. Lắp ráp cấu trúc Cây (Tree) cho từng danh mục gốc
+        const structuredData = rootRows.map(root => {
+            const children = childRows.filter(child => child.ParentCategoryID === root.CategoryID);
+            return {
+                ...root,
+                children: children
+            };
+        });
 
         res.json({
             success: true,
-            count: rows.length,
-            data: rows
+            count: totalItems,
+            data: structuredData,
+            pagination: {
+                currentPage: page,
+                limit: limit,
+                totalItems: totalItems,
+                totalPages: totalPages
+            }
         });
     } catch (error) {
-        console.error('Lỗi lấy danh sách danh mục:', error);
+        console.error('Lỗi lấy danh sách danh mục phân trang:', error);
         res.status(500).json({ success: false, message: 'Lỗi server nội bộ' });
     }
 };

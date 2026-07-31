@@ -165,18 +165,20 @@ function Goals() {
 
   // Thao tác chỉnh sửa
   const handleEdit = (goal) => {
-    const originalGoal = goals.find((g) => g.id === goal.id);
+    const goalKey = goal.GoalID ?? goal.id;
+    const originalGoal = goals.find((g) => (g.GoalID ?? g.id) === goalKey);
     setEditingGoal(originalGoal || goal);
     setIsModalOpen(true);
   };
 
   // Thao tác đổi trạng thái Ẩn / Hiện trực tiếp (Async)
   const handleToggleStatus = async (goalId, currentStatus) => {
-    const goalToUpdate = goals.find((g) => g.id === goalId);
+    const goalToUpdate = goals.find((g) => (g.GoalID ?? g.id) === goalId);
     if (!goalToUpdate) return;
 
+    const realId = goalToUpdate.GoalID ?? goalToUpdate.id;
     const newStatus = currentStatus === "active" ? "inactive" : "active";
-    await updateGoal(goalId, { ...goalToUpdate, status: newStatus });
+    await updateGoal(realId, { ...goalToUpdate, status: newStatus });
     loadGoals();
   };
 
@@ -192,7 +194,8 @@ function Goals() {
 
   const handleConfirmDelete = async () => {
     if (!selectedGoal) return;
-    await deleteGoal(selectedGoal.id, selectedGoal.name);
+    const realId = selectedGoal.GoalID ?? selectedGoal.id;
+    await deleteGoal(realId, selectedGoal.name);
     setShowDeleteModal(false);
     setSelectedGoal(null);
     loadGoals();

@@ -54,12 +54,18 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const loadOrders = async () => {
+  // State phân trang Offset-Based
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const limit = 6; // Số lượng đơn hàng hiển thị trên mỗi trang
+
+  const loadOrders = async (page = 1) => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token") || localStorage.getItem("gymbro_token");
       
-      const response = await axios.get("http://localhost:5000/api/orders/my-orders", {
+      const response = await axios.get(`http://localhost:5000/api/orders/my-orders?page=${page}&limit=${limit}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -67,6 +73,11 @@ export default function Orders() {
 
       if (response.data && response.data.success) {
         setOrders(response.data.data);
+        if (response.data.pagination) {
+          setCurrentPage(response.data.pagination.currentPage);
+          setTotalPages(response.data.pagination.totalPages);
+          setTotalItems(response.data.pagination.totalItems);
+        }
       } else {
         setOrders([]);
       }
@@ -80,15 +91,15 @@ export default function Orders() {
 
   useEffect(() => {
     if (user) {
-      loadOrders();
+      loadOrders(currentPage);
     }
-  }, [user]);
+  }, [user, currentPage]);
 
   return (
     <ProfileLayout>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-black text-[#14213D] uppercase tracking-wide">
-          Đơn Hàng Của Bạn ({orders.length})
+          Đơn Hàng Của Bạn ({totalItems})
         </h2>
       </div>
 
@@ -117,7 +128,6 @@ export default function Orders() {
                 const orderAddress = order.Address || order.address || order.shippingAddress?.address || "---";
                 const orderTotal = order.TotalAmount ?? order.totalAmount ?? order.totalPrice ?? order.total ?? 0;
 
-                // Đồng bộ trạng thái vận chuyển và thanh toán khớp với phía Admin
                 const shippingStatus = order.Status || order.status || order.ShippingStatus || order.shippingStatus || 'Chờ xác nhận';
                 let paymentStatus = order.PaymentStatus || order.paymentStatus || order.payment_status || 'Chưa thanh toán';
 
@@ -158,6 +168,41 @@ export default function Orders() {
           </tbody>
         </table>
       </div>
+
+      {/* 💡 Giao diện thanh phân trang số (1, 2, 3...) */}
+      {!loading && totalPages > 1 && (
+        <div className="flex justify-center items-center gap-2 mt-8">
+          <button
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            className="px-3.5 py-1.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition"
+          >
+            ‹ Trước
+          </button>
+
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+            <button
+              key={page}
+              onClick={() => setCurrentPage(page)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold transition shadow-sm ${
+                currentPage === page
+                  ? "bg-[#14213D] text-white"
+                  : "border border-gray-300 text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              {page}
+            </button>
+          ))}
+
+          <button
+            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+            disabled={currentPage === totalPages}
+            className="px-3.5 py-1.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100 transition"
+          >
+            Sau ›
+          </button>
+        </div>
+      )}
     </ProfileLayout>
   );
 }

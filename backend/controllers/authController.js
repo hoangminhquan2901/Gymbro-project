@@ -313,6 +313,21 @@ exports.register = async (req, res) => {
 // ==========================================
 exports.getAllCustomers = async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 1. Đếm tổng số khách hàng thỏa mãn điều kiện
+        const countQuery = `
+            SELECT COUNT(*) as total 
+            FROM Users u 
+            WHERE u.Role = 'Customer'
+        `;
+        const [countResult] = await db.query(countQuery);
+        const totalItems = countResult[0].total;
+        const totalPages = Math.ceil(totalItems / limit) || 1;
+
+        // 2. Lấy dữ liệu phân trang
         const query = `
             SELECT 
                 u.UserID as id,
@@ -328,13 +343,20 @@ exports.getAllCustomers = async (req, res) => {
             LEFT JOIN Customers c ON u.UserID = c.UserID
             WHERE u.Role = 'Customer'
             ORDER BY u.CreatedAt DESC
+            LIMIT ? OFFSET ?
         `;
 
-        const [customers] = await db.query(query);
+        const [customers] = await db.query(query, [Number(limit), Number(offset)]);
 
         return res.status(200).json({
             success: true,
-            data: customers
+            data: customers,
+            pagination: {
+                currentPage: page,
+                limit: limit,
+                totalItems: totalItems,
+                totalPages: totalPages
+            }
         });
     } catch (error) {
         console.error('Lỗi lấy danh sách khách hàng:', error);

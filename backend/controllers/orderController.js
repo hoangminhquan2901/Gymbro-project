@@ -138,18 +138,40 @@ exports.getMyOrders = async (req, res) => {
             }
         }
 
-        // 2. Tra cứu đơn hàng theo CustomerID HOẶC Email tài khoản
+        // 2. Thiết lập tham số phân trang từ Query (Mặc định trang 1, mỗi trang 5 đơn hàng)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const offset = (page - 1) * limit;
+
+        const whereClause = `WHERE (CustomerID IS NOT NULL AND CustomerID = ?) OR (Email IS NOT NULL AND Email = ?)`;
+        const queryParams = [customerId || '', userEmail];
+
+        // 3. Đếm tổng số đơn hàng của khách hàng này
+        const [countResult] = await db.query(
+            `SELECT COUNT(*) AS total FROM Orders ${whereClause}`,
+            queryParams
+        );
+        const totalItems = countResult[0].total;
+        const totalPages = Math.ceil(totalItems / limit) || 1;
+
+        // 4. Lấy danh sách đơn hàng phân trang theo LIMIT và OFFSET
         const [orders] = await db.query(
             `SELECT * FROM Orders 
-             WHERE (CustomerID IS NOT NULL AND CustomerID = ?) 
-                OR (Email IS NOT NULL AND Email = ?)
-             ORDER BY CreatedAt DESC`,
-            [customerId || '', userEmail]
+             ${whereClause}
+             ORDER BY CreatedAt DESC 
+             LIMIT ? OFFSET ?`,
+            [...queryParams, Number(limit), Number(offset)]
         );
 
         return res.status(200).json({
             success: true,
-            data: orders
+            data: orders,
+            pagination: {
+                currentPage: page,
+                limit: limit,
+                totalItems: totalItems,
+                totalPages: totalPages
+            }
         });
     } catch (error) {
         console.error('Lỗi getMyOrders:', error);
@@ -192,10 +214,30 @@ exports.getOrderById = async (req, res) => {
 // ==========================================
 exports.getAllOrdersForAdmin = async (req, res) => {
     try {
-        const [orders] = await db.query(`SELECT * FROM Orders ORDER BY CreatedAt DESC`);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 1. Đếm tổng số lượng đơn hàng trong hệ thống
+        const [countResult] = await db.query(`SELECT COUNT(*) AS total FROM Orders`);
+        const totalItems = countResult[0].total;
+        const totalPages = Math.ceil(totalItems / limit) || 1;
+
+        // 2. Lấy danh sách đơn hàng phân trang
+        const [orders] = await db.query(
+            `SELECT * FROM Orders ORDER BY CreatedAt DESC LIMIT ? OFFSET ?`,
+            [Number(limit), Number(offset)]
+        );
+
         return res.status(200).json({
             success: true,
-            data: orders
+            data: orders,
+            pagination: {
+                currentPage: page,
+                limit: limit,
+                totalItems: totalItems,
+                totalPages: totalPages
+            }
         });
     } catch (error) {
         console.error('Lỗi getAllOrdersForAdmin:', error);
