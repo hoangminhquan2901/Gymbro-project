@@ -68,7 +68,38 @@ exports.createOrder = async (req, res) => {
         const totalAmount = cartItems.reduce((sum, item) => sum + (item.Quantity * item.Price), 0);
         const orderId = generateOrderId();
 
-        // 4. Lưu thông tin Đơn hàng vào bảng Orders
+        // 3.1. KIỂM TRA VÀ TRỪ TỒN KHO TRONG BẢNG ProductFlavors
+        for (const item of cartItems) {
+            const [flavorRows] = await connection.query(
+                'SELECT Stock FROM ProductFlavors WHERE FlavorID = ?',
+                [item.FlavorID]
+            );
+
+            if (flavorRows.length === 0) {
+                await connection.rollback();
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Không tìm thấy thông tin phân loại của sản phẩm!` 
+                });
+            }
+
+            const currentStock = flavorRows[0].Stock;
+
+            if (currentStock < item.Quantity) {
+                await connection.rollback();
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Sản phẩm "${item.ProductName} (${item.FlavorName})" không đủ số lượng trong kho (Chỉ còn ${currentStock} sản phẩm)!` 
+                });
+            }
+
+            await connection.query(
+                'UPDATE ProductFlavors SET Stock = Stock - ? WHERE FlavorID = ?',
+                [item.Quantity, item.FlavorID]
+            );
+        }
+
+        // 4. Lưu thông tin Đơn hàng vào bảng Orders (Mặc định ban đầu: Chưa thanh toán)
         await connection.query(
             `INSERT INTO Orders 
             (OrderID, CustomerID, CustomerName, Phone, Email, Address, Note, PaymentMethod, PaymentStatus, ShippingStatus, Status, TotalAmount) 
@@ -89,17 +120,8 @@ exports.createOrder = async (req, res) => {
         // 6. Xóa toàn bộ sản phẩm trong giỏ hàng sau khi đã đặt hàng thành công
         await connection.query('DELETE FROM CartItems WHERE CartID = ?', [cartId]);
 
-        // 💡 7. CẬP NHẬT TĂNG SỐ ĐƠN & TỔNG CHI TIÊU VÀO BẢNG CUSTOMERS
-        if (customerId) {
-            await connection.query(
-                `UPDATE Customers 
-                 SET TotalOrders = TotalOrders + 1,
-                     TotalSpent = TotalSpent + ?,
-                     LastOrderDate = NOW()
-                 WHERE CustomerID = ?`,
-                [totalAmount, customerId]
-            );
-        }
+        // 💡 LƯU Ý: Đã gỡ bỏ logic cộng tiền/đơn hàng ở đây. 
+        // Hệ thống sẽ chỉ cộng dồn khi Admin duyệt đơn sang trạng thái "Đã thanh toán".
 
         await connection.commit();
 
@@ -127,7 +149,6 @@ exports.getMyOrders = async (req, res) => {
         const userEmail = req.user.email || '';
         let customerId = req.user.customerId || req.user.CustomerID;
 
-        // 1. Tự động tìm CustomerID từ UserID nếu chưa có trong token
         if (!customerId && userId) {
             const [customers] = await db.query(
                 'SELECT CustomerID FROM Customers WHERE UserID = ?',
@@ -138,7 +159,6 @@ exports.getMyOrders = async (req, res) => {
             }
         }
 
-        // 2. Thiết lập tham số phân trang từ Query (Mặc định trang 1, mỗi trang 5 đơn hàng)
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 5;
         const offset = (page - 1) * limit;
@@ -146,7 +166,6 @@ exports.getMyOrders = async (req, res) => {
         const whereClause = `WHERE (CustomerID IS NOT NULL AND CustomerID = ?) OR (Email IS NOT NULL AND Email = ?)`;
         const queryParams = [customerId || '', userEmail];
 
-        // 3. Đếm tổng số đơn hàng của khách hàng này
         const [countResult] = await db.query(
             `SELECT COUNT(*) AS total FROM Orders ${whereClause}`,
             queryParams
@@ -154,7 +173,6 @@ exports.getMyOrders = async (req, res) => {
         const totalItems = countResult[0].total;
         const totalPages = Math.ceil(totalItems / limit) || 1;
 
-        // 4. Lấy danh sách đơn hàng phân trang theo LIMIT và OFFSET
         const [orders] = await db.query(
             `SELECT * FROM Orders 
              ${whereClause}
@@ -218,12 +236,10 @@ exports.getAllOrdersForAdmin = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // 1. Đếm tổng số lượng đơn hàng trong hệ thống
         const [countResult] = await db.query(`SELECT COUNT(*) AS total FROM Orders`);
         const totalItems = countResult[0].total;
         const totalPages = Math.ceil(totalItems / limit) || 1;
 
-        // 2. Lấy danh sách đơn hàng phân trang
         const [orders] = await db.query(
             `SELECT * FROM Orders ORDER BY CreatedAt DESC LIMIT ? OFFSET ?`,
             [Number(limit), Number(offset)]
@@ -252,13 +268,31 @@ exports.updateOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { status, paymentStatus, shippingStatus } = req.body;
 
+    const connection = await db.getConnection();
     try {
-        const [orders] = await db.query('SELECT OrderID FROM Orders WHERE OrderID = ?', [orderId]);
+        await connection.beginTransaction();
+
+        // 1. Lấy thông tin cũ của đơn hàng
+        const [orders] = await connection.query(
+            'SELECT OrderID, CustomerID, TotalAmount, PaymentStatus, Status FROM Orders WHERE OrderID = ?', 
+            [orderId]
+        );
         if (orders.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng!' });
         }
 
-        await db.query(
+        const currentOrder = orders[0];
+        const customerId = currentOrder.CustomerID;
+        const totalAmount = Number(currentOrder.TotalAmount) || 0;
+        const oldPaymentStatus = currentOrder.PaymentStatus;
+        const oldStatus = currentOrder.Status;
+
+        const newPaymentStatus = paymentStatus !== undefined ? paymentStatus : oldPaymentStatus;
+        const newStatus = status !== undefined ? status : oldStatus;
+
+        // 2. Thực hiện cập nhật trạng thái đơn hàng
+        await connection.query(
             `UPDATE Orders 
             SET Status = COALESCE(?, Status),
                 PaymentStatus = COALESCE(?, PaymentStatus),
@@ -267,10 +301,43 @@ exports.updateOrderStatus = async (req, res) => {
             [status, paymentStatus, shippingStatus, orderId]
         );
 
+        // 3. Kiểm tra điều kiện cộng tiền
+        const successKeywords = ['Đã thanh toán', 'Hoàn thành', 'Đã hoàn thành'];
+        const isNowPaid = successKeywords.includes(newPaymentStatus) || successKeywords.includes(newStatus);
+        const wasPaidBefore = successKeywords.includes(oldPaymentStatus) || successKeywords.includes(oldStatus);
+
+        if (!wasPaidBefore && isNowPaid) {
+            if (customerId) {
+                console.log(`--> Đơn hàng ${orderId} đã hoàn thành/thanh toán! Đang cộng ${totalAmount} cho CustomerID: ${customerId}`);
+                
+                // 💡 ĐÃ SỬA 'VIP' THÀNH 'Diamond' CHO KHỚP VỚI CẤU TRÚC ENUM CỦA BẠN
+                await connection.query(
+                    `UPDATE Customers 
+                     SET TotalOrders = COALESCE(TotalOrders, 0) + 1,
+                         TotalSpent = COALESCE(TotalSpent, 0) + ?,
+                         LastOrderDate = NOW(),
+                         Tier = CASE 
+                             WHEN (COALESCE(TotalSpent, 0) + ?) >= 10000000 THEN 'Diamond'
+                             WHEN (COALESCE(TotalSpent, 0) + ?) >= 5000000 THEN 'Gold'
+                             WHEN (COALESCE(TotalSpent, 0) + ?) >= 1000000 THEN 'Silver'
+                             ELSE 'Bronze'
+                         END
+                     WHERE CustomerID = ?`,
+                    [totalAmount, totalAmount, totalAmount, totalAmount, customerId]
+                );
+            } else {
+                console.log("--> Đơn hàng này có CustomerID là NULL nên không thể cộng tiền vào bảng khách hàng.");
+            }
+        }
+
+        await connection.commit();
         return res.status(200).json({ success: true, message: 'Cập nhật trạng thái đơn hàng thành công!' });
     } catch (error) {
+        await connection.rollback();
         console.error('Lỗi updateOrderStatus:', error);
         return res.status(500).json({ success: false, message: 'Lỗi server khi cập nhật trạng thái đơn hàng!' });
+    } finally {
+        connection.release();
     }
 };
 
@@ -284,26 +351,35 @@ exports.deleteOrder = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // 1. Lấy thông tin đơn hàng trước khi xóa để biết CustomerID và TotalAmount cần trừ lại
-        const [orders] = await connection.query('SELECT CustomerID, TotalAmount FROM Orders WHERE OrderID = ?', [orderId]);
+        // 1. Lấy thông tin đơn hàng trước khi xóa để kiểm tra xem đã thanh toán chưa
+        const [orders] = await connection.query(
+            'SELECT CustomerID, TotalAmount, PaymentStatus FROM Orders WHERE OrderID = ?', 
+            [orderId]
+        );
         if (orders.length === 0) {
             await connection.rollback();
             return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng!' });
         }
 
-        const { CustomerID, TotalAmount } = orders[0];
+        const { CustomerID, TotalAmount, PaymentStatus } = orders[0];
 
-        // 2. Xóa đơn hàng (Bảng OrderDetails sẽ tự động xóa theo CASCADE trong CSDL)
+        // 2. Xóa đơn hàng (Bảng OrderDetails tự động xóa theo CASCADE)
         await connection.query('DELETE FROM Orders WHERE OrderID = ?', [orderId]);
 
-        // 💡 3. CẬP NHẬT GIẢM SỐ ĐƠN & TRỪ TIỀN Ở BẢNG CUSTOMERS NẾU CÓ
-        if (CustomerID) {
+        // 💡 3. CHỈ TRỪ LẠI TIỀN VÀ SỐ ĐƠN NẾU ĐƠN HÀNG ĐÓ ĐÃ TỪNG ĐƯỢC THANH TOÁN
+        if (CustomerID && PaymentStatus === 'Đã thanh toán') {
             await connection.query(
                 `UPDATE Customers 
                  SET TotalOrders = GREATEST(TotalOrders - 1, 0),
-                     TotalSpent = GREATEST(TotalSpent - ?, 0)
+                     TotalSpent = GREATEST(TotalSpent - ?, 0),
+                     Tier = CASE 
+                         WHEN TotalSpent - ? >= 10000000 THEN 'VIP'
+                         WHEN TotalSpent - ? >= 5000000 THEN 'Gold'
+                         WHEN TotalSpent - ? >= 1000000 THEN 'Silver'
+                         ELSE 'Bronze'
+                     END
                  WHERE CustomerID = ?`,
-                [TotalAmount, CustomerID]
+                [TotalAmount, TotalAmount, TotalAmount, TotalAmount, CustomerID]
             );
         }
 
@@ -316,6 +392,124 @@ exports.deleteOrder = async (req, res) => {
     } catch (error) {
         await connection.rollback();
         console.error('Lỗi deleteOrder:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi xóa đơn hàng!' });
+    } finally {
+        connection.release();
+    }
+};
+
+// ==========================================
+// 7. API DÀNH CHO ADMIN: LẤY LỊCH SỬ ĐƠN HÀNG THEO CUSTOMER ID
+// ==========================================
+exports.getOrdersByCustomerId = async (req, res) => {
+    const { customerId } = req.params;
+
+    try {
+        const [orders] = await db.query(
+            `SELECT 
+                OrderID as id, 
+                CreatedAt as date, 
+                TotalAmount as total, 
+                Status as status,
+                PaymentStatus as paymentStatus,
+                ShippingStatus as shippingStatus
+             FROM Orders 
+             WHERE CustomerID = ? 
+             ORDER BY CreatedAt DESC`,
+            [customerId]
+        );
+
+        return res.status(200).json({
+            success: true,
+            data: orders
+        });
+    } catch (error) {
+        console.error('Lỗi getOrdersByCustomerId:', error);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Lỗi server khi lấy lịch sử đơn hàng của khách hàng!' 
+        });
+    }
+};
+
+// ==========================================
+// API XÓA ĐƠN HÀNG VÀ TỰ ĐỘNG ĐỒNG BỘ LẠI THÔNG TIN KHÁCH HÀNG
+// ==========================================
+exports.deleteOrder = async (req, res) => {
+    const { orderId } = req.params;
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        // 1. Lấy thông tin đơn hàng trước khi xóa để biết thuộc khách nào
+        const [orders] = await connection.query(
+            'SELECT OrderID, CustomerID FROM Orders WHERE OrderID = ?', 
+            [orderId]
+        );
+
+        if (orders.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng!' });
+        }
+
+        const customerId = orders[0].CustomerID;
+
+        // 2. Xóa chi tiết đơn hàng trước (tránh lỗi khóa ngoại nếu có bảng OrderDetails)
+        await connection.query('DELETE FROM OrderDetails WHERE OrderID = ?', [orderId]);
+
+        // 3. Xóa đơn hàng chính
+        await connection.query('DELETE FROM Orders WHERE OrderID = ?', [orderId]);
+
+        // 4. Nếu đơn hàng này thuộc về một khách hàng, tiến hành TÍNH LẠI TOÀN BỘ chỉ số của khách đó
+        if (customerId) {
+            // Lấy tất cả các đơn hàng thành công/đã thanh toán CÒN LẠI của khách này
+            // (Lưu ý: Nếu bảng Orders của bạn lưu ngày tạo bằng cột 'OrderDate' thay vì 'CreatedAt', bạn hãy sửa lại cho khớp)
+            const [remainingOrders] = await connection.query(
+                `SELECT TotalAmount, CreatedAt FROM Orders 
+                 WHERE CustomerID = ? AND (Status IN ('Hoàn thành', 'Đã hoàn thành') OR PaymentStatus IN ('Đã thanh toán', 'Hoàn thành', 'Đã hoàn thành'))`,
+                [customerId]
+            );
+
+            const totalOrders = remainingOrders.length;
+            const totalSpent = remainingOrders.reduce((sum, order) => sum + Number(order.TotalAmount || 0), 0);
+
+            // Tìm ngày của đơn hàng gần nhất trong số các đơn còn lại
+            let lastOrderDate = null;
+            if (totalOrders > 0) {
+                // Sắp xếp giảm dần theo ngày tạo để lấy đơn mới nhất
+                remainingOrders.sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt));
+                lastOrderDate = remainingOrders[0].CreatedAt;
+            }
+
+            // Tính toán lại Cấp độ (Tier) dựa trên tổng chi tiêu mới
+            let tier = 'Bronze';
+            if (totalSpent >= 10000000) {
+                tier = 'Diamond';
+            } else if (totalSpent >= 5000000) {
+                tier = 'Gold';
+            } else if (totalSpent >= 1000000) {
+                tier = 'Silver';
+            }
+
+            // 5. Cập nhật lại toàn bộ thông tin vào bảng Customers
+            await connection.query(
+                `UPDATE Customers 
+                 SET TotalOrders = ?, 
+                     TotalSpent = ?, 
+                     LastOrderDate = ?, 
+                     Tier = ? 
+                 WHERE CustomerID = ?`,
+                [totalOrders, totalSpent, lastOrderDate, tier, customerId]
+            );
+        }
+
+        await connection.commit();
+        return res.status(200).json({ success: true, message: 'Xóa đơn hàng và cập nhật lại thông tin khách hàng thành công!' });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error('Lỗi khi xóa đơn hàng:', error);
         return res.status(500).json({ success: false, message: 'Lỗi server khi xóa đơn hàng!' });
     } finally {
         connection.release();

@@ -6,12 +6,15 @@ export default function CustomerDetailModal({ customer, onClose, onToggleStatus 
 
   const displayName = customer.name || customer.fullName || customer.username || "Khách hàng";
   const displayPhone = customer.phone || customer.phoneNumber || "Chưa cập nhật";
-  const displayId = customer.id || customer._id || "N/A";
+  const displayId = customer.id || customer._id || customer.customerId || "N/A";
   const displayJoinDate = customer.joinDate || customer.createdAt || customer.createdDate || "Vừa đăng ký";
 
   const totalOrders = Number(customer.totalOrders || 0);
   const totalSpent = Number(customer.totalSpent || 0);
   const avgSpent = totalOrders > 0 ? Math.round(totalSpent / totalOrders) : 0;
+
+  // Lấy danh sách đơn hàng linh hoạt từ nhiều tên biến khác nhau mà backend có thể trả về
+  const listOrders = customer.recentOrders || customer.orders || customer.listOrders || [];
 
   // Cập nhật logic kiểm tra trạng thái linh hoạt theo dữ liệu DB MySQL (1/0)
   const checkIsActive = (cus) => {
@@ -27,6 +30,7 @@ export default function CustomerDetailModal({ customer, onClose, onToggleStatus 
 
   const getTierBadge = (tier) => {
     switch (tier?.toUpperCase()) {
+      case "DIAMOND":
       case "VIP": 
         return "bg-purple-100 text-purple-700 border border-purple-200/60";
       case "GOLD": 
@@ -41,6 +45,7 @@ export default function CustomerDetailModal({ customer, onClose, onToggleStatus 
   const getOrderStatusStyle = (status) => {
     switch (status?.toLowerCase()) {
       case "hoàn thành":
+      case "đã hoàn thành":
       case "completed":
         return "bg-emerald-50 text-emerald-700 border border-emerald-200/50";
       case "đang giao":
@@ -175,27 +180,35 @@ export default function CustomerDetailModal({ customer, onClose, onToggleStatus 
               )}
             </div>
 
-            {/* Cột Lịch sử đơn hàng */}
-            <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-gray-100 shadow-xs">
-              <h5 className="font-bold text-[#0B132B] mb-4 text-xs uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Lịch sử mua hàng
-              </h5>
-              <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
-                {customer.recentOrders && customer.recentOrders.length > 0 ? (
-                  customer.recentOrders.map((ord, idx) => (
+            {/* Cột Lịch sử đơn hàng (Hiển thị đầy đủ danh sách đặt hàng) */}
+            <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <h5 className="font-bold text-[#0B132B] text-xs uppercase tracking-wider flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Lịch sử mua hàng
+                </h5>
+                <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                  {listOrders.length} đơn
+                </span>
+              </div>
+
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 flex-1">
+                {listOrders.length > 0 ? (
+                  listOrders.map((ord, idx) => (
                     <div key={idx} className="flex items-center justify-between p-3.5 bg-gray-50/70 hover:bg-gray-50 rounded-xl border border-gray-100/60 transition-all">
                       <div>
-                        <p className="font-bold text-sm text-gray-900 font-mono">{ord.id || ord._id}</p>
+                        <p className="font-bold text-sm text-gray-900 font-mono">#{ord.id || ord.orderId || ord._id}</p>
                         <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                          <Calendar size={12} /> {ord.date || ord.createdAt}
+                          <Calendar size={12} /> {ord.date || ord.createdAt || ord.orderDate}
                         </p>
                       </div>
                       <div className="text-right">
                         <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold mb-1 ${getOrderStatusStyle(ord.status)}`}>
-                          {ord.status}
+                          {ord.status || "Chờ xử lý"}
                         </span>
-                        <p className="font-bold text-sm text-emerald-600">{Number(ord.total || 0).toLocaleString("vi-VN")}đ</p>
+                        <p className="font-bold text-sm text-emerald-600">
+                          {Number(ord.total || ord.totalAmount || 0).toLocaleString("vi-VN")}đ
+                        </p>
                       </div>
                     </div>
                   ))
