@@ -31,9 +31,11 @@ function ManageProducts() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // State phân trang Client-side (Cố định limit = 18 sản phẩm/trang)
+  // State phân trang chuẩn Backend
   const [currentPage, setCurrentPage] = useState(1);
-  const limit = 18; 
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const limit = 18; // Mỗi trang 18 sản phẩm
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -74,11 +76,14 @@ function ManageProducts() {
     return stock <= 0 || !isDbActive;
   };
 
-  // Tải toàn bộ danh sách sản phẩm từ API
+  // Tải danh sách sản phẩm từ API theo trang và limit
   const loadProducts = async () => {
     try {
-      const res = await getAllProducts(); // Lấy toàn bộ danh sách
-      const rawList = res?.data || res || [];
+      // ✅ SỬA: Truyền tham số chuẩn dạng (page, limit) khớp với service thông thường
+      const res = await getAllProducts(currentPage, limit); 
+      
+      const rawList = res?.data || res?.products || [];
+      const paginationData = res?.pagination || {};
 
       const normalized = rawList.map((p) => {
         const totalStock = calculateTotalStock(p);
@@ -90,6 +95,8 @@ function ManageProducts() {
       });
 
       setProducts(normalized);
+      setTotalItems(paginationData.totalItems || paginationData.total || 0);
+      setTotalPages(paginationData.totalPages || Math.ceil((paginationData.totalItems || 0) / limit) || 1);
     } catch (error) {
       console.error("Lỗi khi tải danh sách sản phẩm:", error);
       setProducts([]);
@@ -141,9 +148,10 @@ function ManageProducts() {
     }
   };
 
+  // Gọi lại API khi thay đổi trang
   useEffect(() => {
     loadProducts();
-  }, []);
+  }, [currentPage]);
 
   useEffect(() => {
     const handleProductsChange = () => {
@@ -156,7 +164,7 @@ function ManageProducts() {
     };
   }, []);
 
-  // 1. Lọc sản phẩm theo tìm kiếm và trạng thái
+  // Lọc client-side đối với dữ liệu của trang hiện tại
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const name = product.Name || product.name || "";
@@ -175,23 +183,12 @@ function ManageProducts() {
     });
   }, [products, searchTerm, statusFilter]);
 
-  // 2. Tính toán tổng số trang dựa trên danh sách đã lọc
-  const totalItems = filteredProducts.length;
-  const totalPages = Math.ceil(totalItems / limit) || 1;
-
-  // 3. Cắt mảng hiển thị theo trang hiện tại (Client-side Pagination)
-  const paginatedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * limit;
-    const endIndex = startIndex + limit;
-    return filteredProducts.slice(startIndex, endIndex);
-  }, [filteredProducts, currentPage, limit]);
-
   // Reset về trang 1 khi thay đổi từ khóa tìm kiếm hoặc bộ lọc
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter]);
 
-  // ✅ Cuộn lên đầu trang mượt mà mỗi khi đổi trang (hỗ trợ cả custom container lẫn window)
+  // Cuộn lên đầu trang mượt mà mỗi khi đổi trang
   useEffect(() => {
     topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -238,7 +235,7 @@ function ManageProducts() {
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
               Tổng sản phẩm (Hệ thống)
             </p>
-            <h2 className="text-3xl font-bold text-[#14213D] mt-1">{products.length}</h2>
+            <h2 className="text-3xl font-bold text-[#14213D] mt-1">{totalItems}</h2>
           </div>
           <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
             <Package size={24} />
@@ -248,7 +245,7 @@ function ManageProducts() {
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Tổng tồn kho (Hệ thống)
+              Tổng tồn kho (Trang này)
             </p>
             <h2 className="text-3xl font-bold text-emerald-600 mt-1">
               {totalStockCount.toLocaleString()}
@@ -262,7 +259,7 @@ function ManageProducts() {
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Sản phẩm hết hàng
+              Sản phẩm hết hàng (Trang này)
             </p>
             <h2 className="text-3xl font-bold text-red-500 mt-1">{outOfStockProducts}</h2>
           </div>
@@ -276,7 +273,7 @@ function ManageProducts() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-gray-50/50">
           <h2 className="text-lg font-bold text-[#14213D]">
-            Danh sách sản phẩm (Hiển thị {paginatedProducts.length} / Tổng {totalItems})
+            Danh sách sản phẩm (Hiển thị {filteredProducts.length} / Tổng {totalItems} sản phẩm)
           </h2>
 
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
@@ -308,9 +305,9 @@ function ManageProducts() {
           </div>
         </div>
 
-        {/* Component Bảng render dữ liệu đã được cắt trang (paginatedProducts) */}
+        {/* Component Bảng render dữ liệu */}
         <ProductTable
-          products={paginatedProducts}
+          products={filteredProducts}
           onValues={{
             onView: (item) => {
               setSelectedProduct(item);
