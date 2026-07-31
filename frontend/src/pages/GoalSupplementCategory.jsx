@@ -29,12 +29,19 @@ const PRICE_RANGES = [
   { label: "Giá trên 2.500.000đ", value: "o25", min: 2500000, max: Infinity },
 ];
 
-function parsePrice(price) {
-  if (typeof price === "number") return price;
+function getRawPrice(product) {
+  if (!product) return 0;
+  const val = product.Price ?? product.price ?? product.regularPrice ?? product.salePrice;
+  if (typeof val === "number") return val;
+  if (!val || String(val).toLowerCase().includes("liên hệ")) return 0;
+  const parsed = parseFloat(String(val).replace(",", "."));
+  return isNaN(parsed) ? 0 : Math.round(parsed);
+}
 
-  if (!price) return 0;
-
-  return Math.round(parseFloat(String(price).replace(",", "."))) || 0;
+function formatDisplayPrice(product) {
+  const rawPrice = getRawPrice(product);
+  if (rawPrice <= 0) return "Liên hệ";
+  return rawPrice.toLocaleString("vi-VN") + "đ";
 }
 
 function isProductInGoal(product, goal) {
@@ -54,6 +61,7 @@ function GoalSupplementCategory() {
   const [sortBy, setSortBy] = useState("newest");
   const [filterPrice, setFilterPrice] = useState("all");
   const [onlyInStock, setOnlyInStock] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(12);
 
   const loadData = async () => {
     try {
@@ -80,6 +88,11 @@ function GoalSupplementCategory() {
     };
   }, []);
 
+  // Reset số lượng hiển thị về 12 khi thay đổi bộ lọc hoặc sắp xếp
+  useEffect(() => {
+    setVisibleCount(12);
+  }, [filterPrice, onlyInStock, sortBy]);
+
   const categories = goals.map((cat) => {
     const count = products.filter((p) => isProductInGoal(p, cat)).length;
     return {
@@ -94,9 +107,10 @@ function GoalSupplementCategory() {
 
   const displayProducts = [...products];
 
-  const priceRange = PRICE_RANGES.find((r) => r.value === filterPrice);
+  const priceRange = PRICE_RANGES.find((r) => r.value === filterPrice) || PRICE_RANGES[0];
   let filtered = displayProducts.filter((p) => {
-    const price = parsePrice(p.Price || p.price || p.regularPrice || p.salePrice);
+    const price = getRawPrice(p);
+    if (price === 0) return filterPrice === "all";
     return price >= priceRange.min && price <= priceRange.max;
   });
 
@@ -104,17 +118,28 @@ function GoalSupplementCategory() {
     filtered = filtered.filter(
         (p) => Number(p.status) === 1
     );
-}
+  }
 
   filtered = [...filtered].sort((a, b) => {
-    const priceA = parsePrice(a.Price || a.price || a.regularPrice);
-    const priceB = parsePrice(b.Price || b.price || b.regularPrice);
-    if (sortBy === "name_asc") return (a.Name || a.name || "").localeCompare(b.Name || b.name || "");
-    if (sortBy === "name_desc") return (b.Name || b.name || "").localeCompare(a.Name || a.name || "");
+    const priceA = getRawPrice(a);
+    const priceB = getRawPrice(b);
+    const nameA = a?.Name || a?.name || "";
+    const nameB = b?.Name || b?.name || "";
+
+    if (sortBy === "name_asc") return nameA.localeCompare(nameB);
+    if (sortBy === "name_desc") return nameB.localeCompare(nameA);
     if (sortBy === "price_asc") return priceA - priceB;
     if (sortBy === "price_desc") return priceB - priceA;
     return 0;
   });
+
+  // Phân trang phía client dựa trên danh sách đã lọc
+  const paginatedProducts = filtered.slice(0, visibleCount);
+  const hasMoreProducts = visibleCount < filtered.length;
+
+  const handleLoadMore = () => {
+    setVisibleCount((prev) => prev + 12);
+  };
 
   return (
     <div className="min-h-screen bg-[#E5E5E5] text-[#000000]">
@@ -156,6 +181,7 @@ function GoalSupplementCategory() {
         <div className="flex items-center gap-4 mb-8">
           <div className="flex-1 h-px bg-[#d6d6d6]" />
           <h2 className="text-2xl font-black text-[#14213D] uppercase whitespace-nowrap">
+            {/* Hiển thị chính xác tổng số sản phẩm đã qua lọc */}
             Tất Cả Sản Phẩm ({filtered.length})
           </h2>
           <div className="flex-1 h-px bg-[#d6d6d6]" />
@@ -217,20 +243,34 @@ function GoalSupplementCategory() {
 
           <div>
             {filtered.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
-                {filtered.map((product) => (
-                  <ProductCard
-                    key={product.ProductID}
-                    product={{
-                      id: product.ProductID,
-                      name: product.Name,
-                      price: parsePrice(product.Price),
-                      img: product.Image,
-                      tag: "Giỏ hàng",
-                    }}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {paginatedProducts.map((product) => (
+                    <ProductCard
+                      key={product.ProductID || product.id}
+                      product={{
+                        ...product,
+                        id: product.ProductID || product.id,
+                        name: product.Name || product.name || "Sản phẩm",
+                        price: formatDisplayPrice(product),
+                        img: product.Image || product.image || product.img,
+                        tag: "Giỏ hàng",
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {hasMoreProducts && (
+                  <div className="flex justify-center mt-10">
+                    <button
+                      onClick={handleLoadMore}
+                      className="px-6 py-3 bg-[#14213D] text-white font-bold rounded-xl hover:bg-[#FCA311] hover:text-[#14213D] transition cursor-pointer shadow-md"
+                    >
+                      Xem thêm sản phẩm 
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-20 text-gray-400 italic bg-white rounded-xl border border-[#d6d6d6]">
                 Đang cập nhật sản phẩm...

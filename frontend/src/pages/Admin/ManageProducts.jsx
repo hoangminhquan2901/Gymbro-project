@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Plus, Package, CheckCircle2, AlertTriangle, Search, Filter } from "lucide-react";
 
 import {
@@ -12,7 +12,7 @@ import ProductFormModal from "../../components/Admin/ProductFormModal";
 import ProductDetailModal from "../../components/Admin/ProductDetailModal";
 import DeleteModal from "../../components/Admin/DeleteModal";
 
-// ✅ HÀM ÉP KIỂU TRẠNG THÁI DB SANG BOOLEAN (ĐỒNG BỘ CẢ 2 FILE)
+// ✅ HÀM ÉP KIỂU TRẠNG THÁI DB SANG BOOLEAN
 const parseDbStatus = (rawStatus) => {
   if (rawStatus === undefined || rawStatus === null) return true;
   if (typeof rawStatus === "boolean") return rawStatus;
@@ -31,15 +31,21 @@ function ManageProducts() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  // State phân trang Client-side (Cố định limit = 18 sản phẩm/trang)
+  const [currentPage, setCurrentPage] = useState(1);
+  const limit = 18; 
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
+  // Ref để định vị phần đầu trang
+  const topRef = useRef(null);
+
   // HÀM TÍNH TỔNG TỒN KHO
   const calculateTotalStock = (item) => {
     if (!item) return 0;
-
     let flavList = item.Flavors || item.flavors || [];
     if (typeof flavList === "string") {
       try {
@@ -60,20 +66,19 @@ function ManageProducts() {
     return Number(directStock) || 0;
   };
 
-  // ✅ HÀM KIỂM TRA SẢN PHẨM HẾT HÀNG (SỬ DỤNG parseDbStatus ĐỂ ĐỒNG BỘ VỚI BẢNG)
+  // ✅ HÀM KIỂM TRA SẢN PHẨM HẾT HÀNG
   const isProductOutOfStock = (item) => {
     if (!item) return false;
     const stock = calculateTotalStock(item);
     const isDbActive = parseDbStatus(item.Status !== undefined ? item.Status : item.status);
-
-    // Hết hàng khi: Tồn kho <= 0 HOẶC Trạng thái đang TẮT (isDbActive === false)
     return stock <= 0 || !isDbActive;
   };
 
+  // Tải toàn bộ danh sách sản phẩm từ API
   const loadProducts = async () => {
     try {
-      const res = await getAllProducts();
-      const rawList = Array.isArray(res) ? res : res?.data || [];
+      const res = await getAllProducts(); // Lấy toàn bộ danh sách
+      const rawList = res?.data || res || [];
 
       const normalized = rawList.map((p) => {
         const totalStock = calculateTotalStock(p);
@@ -100,7 +105,6 @@ function ManageProducts() {
       const fullProduct = products.find(
         (p) => String(p.ProductID || p.id || p._id) === String(targetId)
       );
-
       if (!fullProduct) return;
 
       let nextStatus;
@@ -128,7 +132,6 @@ function ManageProducts() {
       );
 
       const success = await toggleProductStatus(targetId, payload);
-
       if (!success) {
         loadProducts();
       }
@@ -140,7 +143,9 @@ function ManageProducts() {
 
   useEffect(() => {
     loadProducts();
+  }, []);
 
+  useEffect(() => {
     const handleProductsChange = () => {
       loadProducts();
     };
@@ -151,18 +156,7 @@ function ManageProducts() {
     };
   }, []);
 
-  const totalProducts = products.length;
-
-  const totalStockCount = useMemo(() => {
-    return products.reduce((sum, item) => sum + calculateTotalStock(item), 0);
-  }, [products]);
-
-  // Đếm số sản phẩm hết hàng
-  const outOfStockProducts = useMemo(() => {
-    return products.filter((item) => isProductOutOfStock(item)).length;
-  }, [products]);
-
-  // Bộ lọc sản phẩm theo từ khóa và trạng thái
+  // 1. Lọc sản phẩm theo tìm kiếm và trạng thái
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const name = product.Name || product.name || "";
@@ -181,8 +175,38 @@ function ManageProducts() {
     });
   }, [products, searchTerm, statusFilter]);
 
+  // 2. Tính toán tổng số trang dựa trên danh sách đã lọc
+  const totalItems = filteredProducts.length;
+  const totalPages = Math.ceil(totalItems / limit) || 1;
+
+  // 3. Cắt mảng hiển thị theo trang hiện tại (Client-side Pagination)
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * limit;
+    const endIndex = startIndex + limit;
+    return filteredProducts.slice(startIndex, endIndex);
+  }, [filteredProducts, currentPage, limit]);
+
+  // Reset về trang 1 khi thay đổi từ khóa tìm kiếm hoặc bộ lọc
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  // ✅ Cuộn lên đầu trang mượt mà mỗi khi đổi trang (hỗ trợ cả custom container lẫn window)
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentPage]);
+
+  const totalStockCount = useMemo(() => {
+    return products.reduce((sum, item) => sum + calculateTotalStock(item), 0);
+  }, [products]);
+
+  const outOfStockProducts = useMemo(() => {
+    return products.filter((item) => isProductOutOfStock(item)).length;
+  }, [products]);
+
   return (
-    <div className="space-y-6">
+    <div ref={topRef} className="space-y-6">
       {/* Header Màn hình */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -212,9 +236,9 @@ function ManageProducts() {
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Tổng sản phẩm
+              Tổng sản phẩm (Hệ thống)
             </p>
-            <h2 className="text-3xl font-bold text-[#14213D] mt-1">{totalProducts}</h2>
+            <h2 className="text-3xl font-bold text-[#14213D] mt-1">{products.length}</h2>
           </div>
           <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
             <Package size={24} />
@@ -224,7 +248,7 @@ function ManageProducts() {
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Tổng tồn kho (Tất cả vị)
+              Tổng tồn kho (Hệ thống)
             </p>
             <h2 className="text-3xl font-bold text-emerald-600 mt-1">
               {totalStockCount.toLocaleString()}
@@ -252,7 +276,7 @@ function ManageProducts() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-gray-50/50">
           <h2 className="text-lg font-bold text-[#14213D]">
-            Danh sách sản phẩm ({filteredProducts.length})
+            Danh sách sản phẩm (Hiển thị {paginatedProducts.length} / Tổng {totalItems})
           </h2>
 
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
@@ -284,9 +308,9 @@ function ManageProducts() {
           </div>
         </div>
 
-        {/* Component Bảng render */}
+        {/* Component Bảng render dữ liệu đã được cắt trang (paginatedProducts) */}
         <ProductTable
-          products={filteredProducts}
+          products={paginatedProducts}
           onValues={{
             onView: (item) => {
               setSelectedProduct(item);
@@ -306,9 +330,111 @@ function ManageProducts() {
           }}
           onToggleStatus={handleToggleStatus}
         />
+
+        {/* Thanh Phân Trang Căn Giữa */}
+        <div className="p-4 border-t border-gray-100 flex justify-center bg-white">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setCurrentPage(1)}
+              disabled={currentPage === 1}
+              className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+              title="Trang đầu"
+            >
+              «
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+              title="Trang trước"
+            >
+              ‹
+            </button>
+
+            {(() => {
+              const pages = [];
+              let startPage = Math.max(1, currentPage - 1);
+              let endPage = Math.min(totalPages, currentPage + 1);
+
+              if (currentPage <= 2) {
+                endPage = Math.min(totalPages, 4);
+              } else if (currentPage >= totalPages - 1) {
+                startPage = Math.max(1, totalPages - 3);
+              }
+
+              if (startPage > 1) {
+                pages.push(1);
+                if (startPage > 2) {
+                  pages.push("...");
+                }
+              }
+
+              for (let i = startPage; i <= endPage; i++) {
+                if (i > 0 && i <= totalPages) {
+                  pages.push(i);
+                }
+              }
+
+              if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                  pages.push("...");
+                }
+                pages.push(totalPages);
+              }
+
+              return pages.map((page, index) => {
+                if (page === "...") {
+                  return (
+                    <span key={`ellipsis-${index}`} className="px-2 text-gray-400 font-medium select-none">
+                      ...
+                    </span>
+                  );
+                }
+
+                return (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => setCurrentPage(page)}
+                    className={`w-9 h-9 text-sm rounded-lg font-medium transition-colors cursor-pointer flex items-center justify-center ${
+                      currentPage === page
+                        ? "bg-[#3399FF] text-white shadow-sm"
+                        : "border border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                );
+              });
+            })()}
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+              title="Trang sau"
+            >
+              ›
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={currentPage === totalPages}
+              className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+              title="Trang cuối"
+            >
+              »
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Modal Thêm Sản Phẩm */}
+      {/* Các Modal */}
       <ProductFormModal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -318,7 +444,6 @@ function ManageProducts() {
         }}
       />
 
-      {/* Modal Cập Nhật Sản Phẩm */}
       <ProductFormModal
         isOpen={showEditModal}
         editProduct={selectedProduct}
@@ -333,7 +458,6 @@ function ManageProducts() {
         }}
       />
 
-      {/* Modal Chi Tiết Sản Phẩm */}
       <ProductDetailModal
         isOpen={showDetailModal}
         product={selectedProduct}
@@ -343,7 +467,6 @@ function ManageProducts() {
         }}
       />
 
-      {/* Modal Xác Nhận Xóa */}
       <DeleteModal
         open={showDeleteModal}
         title="Xóa sản phẩm"

@@ -4,7 +4,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import ProductCard from "../components/ProductCard";
 import { slugify } from "../utils/slugify";
 
-// IMPORT CẢ SERVICE SẢN PHẨM VÀ THƯƠNG HIỆU
+// IMPORT SERVICE SẢN PHẨM VÀ THƯƠNG HIỆU
 import { getWebsiteProducts } from "../services/productService";
 import { getAllBrands } from "../services/adminBrandService"; 
 
@@ -18,20 +18,32 @@ const SORT_OPTIONS = [
 
 const PRICE_RANGES = [
   { label: "Tất cả",                    value: "all",   min: 0,      max: Infinity },
-  { label: "Dưới 500.000đ",             value: "u500",  min: 0,      max: 500000   },
-  { label: "500.000đ - 1.000.000đ",   value: "5to1",  min: 500000,  max: 1000000  },
+  { label: "Dưới 500.000đ",            value: "u500",  min: 0,      max: 500000   },
+  { label: "500.000đ - 1.000.000đ",    value: "5to1",  min: 500000,  max: 1000000  },
   { label: "1.000.000đ - 1.500.000đ", value: "1to15", min: 1000000, max: 1500000  },
   { label: "1.500.000đ - 2.000.000đ", value: "15to2", min: 1500000, max: 2000000  },
   { label: "2.000.000đ - 2.500.000đ", value: "2to25", min: 2000000, max: 2500000  },
   { label: "Giá trên 2.500.000đ",     value: "o25",   min: 2500000, max: Infinity },
 ];
 
+const ITEMS_PER_PAGE = 12; // Số lượng sản phẩm hiển thị mỗi lần
+
 function parsePrice(price) {
   if (typeof price === "number") return price;
-
   if (!price) return 0;
 
-  return Math.round(parseFloat(String(price).replace(",", "."))) || 0;
+  // Chuyển đổi trực tiếp nếu chuỗi là dạng số chuẩn (ví dụ: "1010000.00")
+  const num = parseFloat(price);
+  if (!isNaN(num) && String(price).includes('.')) {
+    return Math.round(num);
+  }
+
+  // Xử lý cho các trường hợp chuỗi có định dạng khác
+  const cleanStr = String(price)
+    .replace(/[^\d.,]/g, "")
+    .replace(/,/g, ".");
+  
+  return Math.round(parseFloat(cleanStr)) || 0;
 }
 
 function formatSlugToTitle(slug) {
@@ -53,11 +65,13 @@ function BrandDetail() {
   const [filterPrice, setFilterPrice] = useState("all");
   const [onlyInStock, setOnlyInStock] = useState(false);
   const [selectedSubCat, setSelectedSubCat] = useState("all");
+  
+  // State quản lý số lượng sản phẩm hiển thị cho dạng "Xem thêm"
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
 
   const loadBrandData = async () => {
     try {
       setLoading(true);
-      // 1. Lấy danh sách thương hiệu và sản phẩm bất đồng bộ từ API
       const [allBrandsRes, allProductsRes] = await Promise.all([
         getAllBrands(),
         getWebsiteProducts()
@@ -66,25 +80,40 @@ function BrandDetail() {
       const allBrands = Array.isArray(allBrandsRes) ? allBrandsRes : [];
       const allProducts = Array.isArray(allProductsRes) ? allProductsRes : [];
 
-      const currentBrand = allBrands.find(b => slugify(b.name || b.brandName || "") === brandSlug);
+      const currentBrand = allBrands.find((b) => {
+        const id = b.BrandID || b.id;
+        const name = b.Name || b.name || b.brandName || "";
+        const slug = b.Slug || slugify(name);
+        
+        return (
+          String(id) === brandSlug || 
+          slug === brandSlug || 
+          slugify(name) === brandSlug
+        );
+      });
 
       if (currentBrand) {
         setBrandInfo({
-          name: currentBrand.name || currentBrand.brandName || "",
-          description: currentBrand.description || currentBrand.mota || "",
-          country: currentBrand.country || currentBrand.quocgia || ""
+          id: currentBrand.BrandID || currentBrand.id,
+          name: currentBrand.Name || currentBrand.name || currentBrand.brandName || "",
+          description: currentBrand.Description || currentBrand.description || currentBrand.mota || "",
+          country: currentBrand.Country || currentBrand.country || currentBrand.quocgia || ""
         });
       } else {
         setBrandInfo({
+          id: null,
           name: formatSlugToTitle(brandSlug),
           description: "",
           country: ""
         });
       }
 
-      // 2. Lọc sản phẩm thuộc thương hiệu này
+      const brandId = currentBrand ? (currentBrand.BrandID || currentBrand.id) : null;
+      
       const productsList = allProducts.filter((product) => {
-          return slugify(product.BrandName || "") === brandSlug;
+        const matchId = brandId && String(product.BrandID || product.brand_id || "") === String(brandId);
+        const matchSlug = slugify(product.BrandName || product.brand || "") === brandSlug;
+        return matchId || matchSlug;
       });
 
       setAllBrandProducts(productsList);
@@ -103,44 +132,58 @@ function BrandDetail() {
     };
 
     window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
+    window.addEventListener("productsChanged", loadBrandData);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("productsChanged", loadBrandData);
+    };
   }, [brandSlug]);
+
+  // Reset về số lượng ban đầu khi thay đổi bộ lọc hoặc thương hiệu
+  useEffect(() => {
+    setVisibleCount(ITEMS_PER_PAGE);
+  }, [brandSlug, filterPrice, onlyInStock, selectedSubCat, sortBy]);
 
   const brandSubCats = Array.from(
     new Set(
         allBrandProducts
-            .map((p) => p.SubCategoryName)
+            .map((p) => p.SubCategoryName || p.subCategoryName)
             .filter(Boolean)
     )
   );
 
-  const priceRange = PRICE_RANGES.find((r) => r.value === filterPrice);
+  const priceRange = PRICE_RANGES.find((r) => r.value === filterPrice) || PRICE_RANGES[0];
   
   let filtered = allBrandProducts.filter((p) => {
-    const price = parsePrice(p.Price || p.price);
+    const price = parsePrice(p.Price || p.price || p.regularPrice);
     const matchesPrice = price >= priceRange.min && price <= priceRange.max;
-    const subCat = p.SubCategoryName;
+    const subCat = p.SubCategoryName || p.subCategoryName;
     const matchesSubCat = selectedSubCat === "all" || subCat === selectedSubCat;
     return matchesPrice && matchesSubCat;
   });
 
   if (onlyInStock) {
     filtered = filtered.filter(
-        (p) => Number(p.status) === 1
+        (p) => Number(p.status) === 1 || p.status === true || p.status === "1"
     );
-}
+  }
 
   filtered = [...filtered].sort((a, b) => {
-    if (sortBy === "name_asc")
-        return a.Name.localeCompare(b.Name);
-    if (sortBy === "name_desc")
-        return b.Name.localeCompare(a.Name);
-    if (sortBy === "price_asc")
-        return parsePrice(a.Price) - parsePrice(b.Price);
-    if (sortBy === "price_desc")
-        return parsePrice(b.Price) - parsePrice(a.Price);
+    const nameA = a.Name || a.name || "";
+    const nameB = b.Name || b.name || "";
+    const priceA = parsePrice(a.Price || a.price || a.regularPrice);
+    const priceB = parsePrice(b.Price || b.price || b.regularPrice);
+
+    if (sortBy === "name_asc") return nameA.localeCompare(nameB);
+    if (sortBy === "name_desc") return nameB.localeCompare(nameA);
+    if (sortBy === "price_asc") return priceA - priceB;
+    if (sortBy === "price_desc") return priceB - priceA;
     return 0;
   });
+
+  // Lấy danh sách sản phẩm hiển thị dựa trên visibleCount
+  const displayedProducts = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
 
   return (
     <div className="min-h-screen bg-[#E5E5E5] text-[#000000]">
@@ -188,7 +231,7 @@ function BrandDetail() {
               Tất cả danh mục ({allBrandProducts.length})
             </button>
             {brandSubCats.map((subCat) => {
-              const count = allBrandProducts.filter((p) => p.SubCategoryName === subCat).length;
+              const count = allBrandProducts.filter((p) => (p.SubCategoryName || p.subCategoryName) === subCat).length;
               return (
                 <button
                   key={subCat}
@@ -273,21 +316,35 @@ function BrandDetail() {
               <div className="text-center py-20 text-gray-500 italic bg-white rounded-xl border border-[#d6d6d6]">
                 Đang tải sản phẩm theo thương hiệu...
               </div>
-            ) : filtered.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
-                {filtered.map((product) => (
-                  <ProductCard
-                    key={product.ProductID}
-                    product={{
-                      id: product.ProductID,
-                      name: product.Name,
-                      price: parsePrice(product.Price),
-                      img: product.Image,
-                      tag: "Giỏ hàng",
-                    }}
-                  />
-                ))}
-              </div>
+            ) : displayedProducts.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {displayedProducts.map((product) => (
+                    <ProductCard
+                      key={product.ProductID || product.id}
+                      product={{
+                        id: product.ProductID || product.id,
+                        name: product.Name || product.name,
+                        price: parsePrice(product.Price || product.price || product.regularPrice),
+                        img: product.Image || product.image,
+                        tag: "Giỏ hàng",
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* NÚT XEM THÊM (LOAD MORE) */}
+                {hasMore && (
+                  <div className="flex flex-col items-center mt-10">
+                    <button
+                      onClick={() => setVisibleCount((prev) => prev + 12)}
+                      className="px-6 py-3 bg-[#14213D] text-white font-bold rounded-xl hover:bg-[#FCA311] hover:text-[#14213D] transition cursor-pointer shadow-md"
+                    >
+                      Xem thêm sản phẩm
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-20 text-gray-400 italic bg-white rounded-xl border border-[#d6d6d6]">
                 Đang cập nhật sản phẩm...

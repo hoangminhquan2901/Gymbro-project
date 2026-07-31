@@ -5,7 +5,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import ProductCard from "../components/ProductCard";
 
 import { getWebsiteCategories } from "../services/categoryService";
-import { getWebsiteProducts } from "../services/productService";
+import { getCustomerProductsCursor } from "../services/productService";
 import { slugify } from "../utils/slugify";
 
 const SORT_OPTIONS = [
@@ -26,21 +26,15 @@ const PRICE_RANGES = [
   { label: "Giá trên 2.500.000đ", value: "o25", min: 2500000, max: Infinity },
 ];
 
-// 🎯 HÀM LẤY GIÁ NGUYÊN BẢN (SỐ) - HỖ TRỢ CẢ Price HƠN VÀ price THƯỜNG
 function getRawPrice(product) {
   if (!product) return 0;
-  
   const val = product.Price ?? product.price ?? product.PriceSell ?? product.priceSell;
-
   if (typeof val === "number") return val;
   if (!val || String(val).toLowerCase().includes("liên hệ")) return 0;
-
-  // Sử dụng parseFloat để xử lý chuẩn các số có phần thập phân từ backend (.00)
   const parsed = parseFloat(val);
   return isNaN(parsed) ? 0 : Math.round(parsed);
 }
 
-// 🎯 HÀM ĐỊNH DẠNG HIỂN THỊ GIÁ TIỀN
 function formatDisplayPrice(product) {
   const rawPrice = getRawPrice(product);
   if (rawPrice <= 0) return "Liên hệ";
@@ -49,7 +43,6 @@ function formatDisplayPrice(product) {
 
 function checkProductOutOfStock(product) {
   if (!product) return true;
-
   if (
     product.status === false ||
     product.status === "false" ||
@@ -58,7 +51,6 @@ function checkProductOutOfStock(product) {
   ) {
     return true;
   }
-
   if (Array.isArray(product.flavors) && product.flavors.length > 0) {
     const totalStock = product.flavors.reduce(
       (sum, f) => sum + (Number(f.stock) || 0),
@@ -77,13 +69,10 @@ function checkProductOutOfStock(product) {
   return false;
 }
 
-// 🎯 HÀM CHUẨN HÓA DANH MỤC DÙNG ParentCategoryID
 function normalizeCategory(c) {
   if (!c) return null;
-  
   const id = c.CategoryID ?? c.categoryID ?? c.id;
   const rawParent = c.ParentCategoryID ?? c.parentCategoryID ?? c.parentId;
-
   const isInvalidParent = 
     rawParent === null || 
     rawParent === undefined || 
@@ -114,11 +103,18 @@ function Category() {
   const [filterPrice, setFilterPrice] = useState("all");
   const [onlyInStock, setOnlyInStock] = useState(false);
 
-  const [websiteCategories, setWebsiteCategories] = useState([]);
   const [products, setProducts] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [websiteCategories, setWebsiteCategories] = useState([]);
 
-  async function loadData() {
+  // Số lượng sản phẩm hiển thị trên lưới (phân trang phía client dựa trên dữ liệu đã tải)
+  const [visibleCount, setVisibleCount] = useState(12);
+
+  const categoryParam = slug === "thuc-pham-bo-sung" ? null : slug;
+
+  async function loadInitialData() {
     try {
+      setIsLoading(true);
       const rawCatRes = await getWebsiteCategories();
       
       let rawCategories = [];
@@ -134,24 +130,34 @@ function Category() {
         
       setWebsiteCategories(normalizedCats);
 
-      const rawProdData = await getWebsiteProducts();
-      const allProducts = Array.isArray(rawProdData)
-        ? rawProdData
-        : Array.isArray(rawProdData?.data)
-        ? rawProdData.data
-        : [];
-        
+      // Tự động tải toàn bộ sản phẩm của danh mục để tính toán chính xác số lượng tiêu đề & lọc
+      let allProducts = [];
+      let currentCursor = null;
+      let hasMoreData = true;
+
+      while (hasMoreData) {
+        const prodResult = await getCustomerProductsCursor(currentCursor, 50, categoryParam);
+        const batch = prodResult.data || [];
+        allProducts = [...allProducts, ...batch];
+        hasMoreData = prodResult.pagination?.hasMore || false;
+        currentCursor = prodResult.pagination?.nextCursor || null;
+        if (batch.length === 0) break;
+      }
+
       setProducts(allProducts);
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu:", error);
+    } finally {
+      setIsLoading(false);
     }
   }
 
   useEffect(() => {
-    loadData();
+    loadInitialData();
+    setVisibleCount(12); // Reset về 12 sản phẩm đầu khi đổi danh mục
 
     const handleDataChange = () => {
-      loadData();
+      loadInitialData();
     };
 
     window.addEventListener("categoriesChanged", handleDataChange);
@@ -161,11 +167,12 @@ function Category() {
       window.removeEventListener("categoriesChanged", handleDataChange);
       window.removeEventListener("productsChanged", handleDataChange);
     };
-  }, []);
-
-  useEffect(() => {
-    loadData();
   }, [slug]);
+
+  // Reset lại trang hiển thị khi thay đổi bộ lọc giá hoặc tồn kho hoặc sắp xếp
+  useEffect(() => {
+    setVisibleCount(12);
+  }, [filterPrice, onlyInStock, sortBy]);
 
   const isMainSupplementPage = slug === "thuc-pham-bo-sung";
 
@@ -181,67 +188,69 @@ function Category() {
         (item) => item.slug === slug || slugify(item.name) === slug
       );
 
-  if (!currentCategory) {
+  if (!currentCategory && websiteCategories.length === 0) {
     return (
       <div className="min-h-screen flex justify-center items-center text-gray-500 italic bg-[#E5E5E5]">
-        Đang cập nhật danh mục...
+        Đang tải danh mục...
       </div>
     );
   }
 
-  // 🎯 LỌC CÁC DANH MỤC CARD (DÙNG ParentCategoryID)
+  const displayCategoryName = currentCategory ? currentCategory.name : slug.replace(/-/g, " ");
+
   const subCategoriesData = isMainSupplementPage
     ? websiteCategories.filter((item) => item.ParentCategoryID === null && item.slug !== "thuc-pham-bo-sung")
-    : websiteCategories.filter((item) => item.ParentCategoryID === Number(currentCategory.id || currentCategory.CategoryID));
+    : websiteCategories.filter((item) => currentCategory && Number(item.ParentCategoryID) === Number(currentCategory.id || currentCategory.CategoryID));
 
   const subCategoryNames = subCategoriesData.map((item) =>
     item.name.toLowerCase().trim()
   );
   const subCategoryIds = subCategoriesData.map((item) => String(item.id || item.CategoryID));
 
-  // 🎯 LỌC SẢN PHẨM HIỂN THỊ
   const categoryProducts = products.filter((item) => {
     if (!item) return false;
     if (isMainSupplementPage) return true;
+    if (!currentCategory) return true;
 
-    const prodCatId = String(item.CategoryID || item.categoryId || "");
-    const prodSubCatId = String(
-      item.SubCategoryID || item.subCategoryId || ""
-    );
+    const currCatId = String(currentCategory.id || currentCategory.CategoryID || "");
+    const currCatSlug = currentCategory.slug || "";
+    const currCatName = (currentCategory.name || "").toLowerCase().trim();
 
-    const prodCatName = (
-      item.CategoryName ||
-      item.category ||
-      ""
-    ).toLowerCase().trim();
-    const prodSubCatName = (
-      item.SubCategoryName ||
-      item.subCategory ||
-      item.type ||
-      ""
-    ).toLowerCase().trim();
+    const validCatIds = new Set([currCatId, ...subCategoryIds]);
 
-    const currCatName = currentCategory.name.toLowerCase().trim();
-    const currCatId = String(currentCategory.id || currentCategory.CategoryID);
+    const prodCatId = String(item.CategoryID || item.categoryId || item.category_id || "");
+    const prodSubCatId = String(item.SubCategoryID || item.subCategoryId || item.sub_category_id || "");
+    const prodParentCatId = String(item.ParentCategoryID || item.parentCategoryID || item.parent_category_id || "");
 
-    const isMainCategory =
-      (prodCatId && prodCatId === currCatId) || prodCatName === currCatName;
+    const prodCatSlug = String(item.CategorySlug || item.categorySlug || "").toLowerCase().trim();
+    const prodCatName = (item.CategoryName || item.category || item.category_name || "").toLowerCase().trim();
+    const prodSubCatName = (item.SubCategoryName || item.subCategory || item.sub_category_name || item.type || "").toLowerCase().trim();
 
-    const isParentOfProduct =
-      subCategoryNames.includes(prodCatName) ||
-      subCategoryIds.includes(prodCatId);
+    if (validCatIds.has(prodCatId) || validCatIds.has(prodSubCatId) || validCatIds.has(prodParentCatId)) {
+      return true;
+    }
 
-    const isCurrentSubCategory =
-      (prodSubCatId && prodSubCatId === currCatId) ||
-      prodSubCatName === currCatName;
+    if (prodCatSlug && (prodCatSlug === currCatSlug || prodCatSlug.includes(currCatSlug) || currCatSlug.includes(prodCatSlug))) {
+      return true;
+    }
 
-    return isMainCategory || isParentOfProduct || isCurrentSubCategory;
+    if (currCatName) {
+      if (prodCatName.includes(currCatName) || currCatName.includes(prodCatName)) return true;
+      if (prodSubCatName.includes(currCatName) || currCatName.includes(prodSubCatName)) return true;
+
+      for (const subName of subCategoryNames) {
+        if (subName && (prodCatName.includes(subName) || prodSubCatName.includes(subName) || subName.includes(prodCatName))) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   });
 
   const priceRange =
     PRICE_RANGES.find((item) => item.value === filterPrice) || PRICE_RANGES[0];
 
-  // 🎯 LỌC THEO KHOẢNG GIÁ
   let filtered = categoryProducts.filter((item) => {
     const numericPrice = getRawPrice(item);
     if (numericPrice === 0) return filterPrice === "all";
@@ -252,9 +261,8 @@ function Category() {
     filtered = filtered.filter(
         (p) => Number(p.status) === 1
     );
-}
+  }
 
-  // 🎯 SẮP XẾP SẢN PHẨM
   filtered = [...filtered].sort((a, b) => {
     const nameA = a?.Name || a?.name || "";
     const nameB = b?.Name || b?.name || "";
@@ -268,6 +276,14 @@ function Category() {
     return 0;
   });
 
+  // Danh sách sản phẩm cắt theo số lượng phân trang hiện tại để hiển thị trên lưới
+  const paginatedProducts = filtered.slice(0, visibleCount);
+  const hasMoreProducts = visibleCount < filtered.length;
+
+  const handleLoadMore = () => {
+    setVisibleCount((prev) => prev + 12);
+  };
+
   const buildBreadcrumb = () => {
     if (isMainSupplementPage) {
       return [{ label: "Trang chủ", path: "/" }, { label: "Thực phẩm bổ sung" }];
@@ -278,27 +294,9 @@ function Category() {
       { label: "Thực phẩm bổ sung", path: "/category/thuc-pham-bo-sung" },
     ];
 
-    const ancestors = [];
-    let temp = currentCategory;
-
-    while (temp && !temp.isRoot) {
-      const parentObj = websiteCategories.find(
-        (c) => temp.ParentCategoryID && String(c.CategoryID || c.id) === String(temp.ParentCategoryID)
-      );
-
-      if (parentObj && parentObj.id !== temp.id) {
-        ancestors.unshift({
-          label: parentObj.name,
-          path: `/category/${parentObj.slug}`,
-        });
-        temp = parentObj;
-      } else {
-        break;
-      }
+    if (currentCategory && !currentCategory.isRoot) {
+      items.push({ label: currentCategory.name });
     }
-
-    items.push(...ancestors);
-    items.push({ label: currentCategory.name });
     return items;
   };
 
@@ -308,43 +306,35 @@ function Category() {
         <Breadcrumb items={buildBreadcrumb()} />
 
         <h1 className="text-3xl font-bold text-center text-[#14213D] mb-2">
-          {currentCategory.name}
+          {displayCategoryName}
         </h1>
 
-        {currentCategory.description && (
+        {currentCategory?.description && (
           <p className="text-center text-gray-500 max-w-[800px] mx-auto mb-8 text-sm leading-relaxed">
             {currentCategory.description}
           </p>
         )}
 
-        {/* CÁC DANH MỤC CARD */}
         {subCategoriesData.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-12">
             {subCategoriesData.map((item) => {
               const subCount = products.filter((product) => {
                 if (!product) return false;
-                const prodCat = (
-                  product.CategoryName ||
-                  product.category ||
-                  ""
-                )
-                  .toLowerCase()
-                  .trim();
-                const prodSubCat = (
-                  product.SubCategoryName ||
-                  product.subCategory ||
-                  ""
-                )
-                  .toLowerCase()
-                  .trim();
+                const prodCat = (product.CategoryName || product.category || "").toLowerCase().trim();
+                const prodSubCat = (product.SubCategoryName || product.subCategory || "").toLowerCase().trim();
                 const catName = item.name.toLowerCase().trim();
-                const prodCatId = String(
-                  product.CategoryID || product.categoryId || ""
-                );
+                const prodCatId = String(product.CategoryID || product.categoryId || "");
+                
+                const altNames = [catName];
+                if (catName.includes("whey")) {
+                  altNames.push(catName.replace("whey", "").trim());
+                } else {
+                  altNames.push("whey " + catName);
+                }
+
                 return (
-                  prodCat === catName ||
-                  prodSubCat === catName ||
-                  prodCatId === String(item.CategoryID || item.id)
+                  prodCatId === String(item.CategoryID || item.id) ||
+                  altNames.some(name => prodCat === name || prodSubCat === name || prodCat.includes(name))
                 );
               }).length;
 
@@ -380,6 +370,7 @@ function Category() {
         <div className="flex items-center gap-4 mb-8">
           <div className="flex-1 h-px bg-[#d6d6d6]" />
           <h2 className="text-2xl font-black text-[#14213D] uppercase">
+            {/* Tiêu đề hiển thị chuẩn xác tổng số lượng đã lọc ngay lập tức */}
             Tất Cả Sản Phẩm ({filtered.length})
           </h2>
           <div className="flex-1 h-px bg-[#d6d6d6]" />
@@ -444,30 +435,47 @@ function Category() {
           </aside>
 
           <div>
-            {filtered.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
-                {filtered.map((product, idx) => {
-                  const isOutOfStock = checkProductOutOfStock(product);
-                  const currentTag = isOutOfStock ? "Hết hàng" : "Giỏ hàng";
-
-                  return (
-                    <ProductCard
-                      key={product.ProductID || product.id || `prod-${idx}`}
-                      product={{
-                        ...product,
-                        id: product.ProductID || product.id,
-                        name: product.Name || product.name || "Sản phẩm",
-                        img: product.Image || product.image || product.img,
-                        price: formatDisplayPrice(product), // 🎯 GỌI HÀM ĐỊNH DẠNG GIÁ CHUẨN
-                        tag: currentTag,
-                      }}
-                    />
-                  );
-                })}
+            {isLoading ? (
+              <div className="text-center py-20 text-gray-500 italic bg-white rounded-xl border border-[#d6d6d6]">
+                Đang tải sản phẩm...
               </div>
+            ) : filtered.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {paginatedProducts.map((product, idx) => {
+                    const isOutOfStock = checkProductOutOfStock(product);
+                    const currentTag = isOutOfStock ? "Hết hàng" : "Giỏ hàng";
+
+                    return (
+                      <ProductCard
+                        key={product.ProductID || product.id || `prod-${idx}`}
+                        product={{
+                          ...product,
+                          id: product.ProductID || product.id,
+                          name: product.Name || product.name || "Sản phẩm",
+                          img: product.Image || product.image || product.img,
+                          price: formatDisplayPrice(product),
+                          tag: currentTag,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {hasMoreProducts && (
+                  <div className="flex justify-center mt-10">
+                    <button
+                      onClick={handleLoadMore}
+                      className="px-6 py-3 bg-[#14213D] text-white font-bold rounded-xl hover:bg-[#FCA311] hover:text-[#14213D] transition cursor-pointer shadow-md"
+                    >
+                      Xem thêm sản phẩm 
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-20 text-gray-400 italic bg-white rounded-xl border border-[#d6d6d6]">
-                Đang cập nhật sản phẩm...
+                Không tìm thấy sản phẩm phù hợp...
               </div>
             )}
           </div>
