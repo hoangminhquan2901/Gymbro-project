@@ -29,6 +29,7 @@ function ManageProducts() {
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(""); // Dùng cho debounce tìm kiếm
   const [statusFilter, setStatusFilter] = useState("all");
 
   // State phân trang chuẩn Backend
@@ -44,6 +45,21 @@ function ManageProducts() {
 
   // Ref để định vị phần đầu trang
   const topRef = useRef(null);
+
+  // ✅ Xử lý Debounce cho ô tìm kiếm (tránh gọi API liên tục khi đang gõ)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+      setCurrentPage(1); // Reset về trang 1 khi đổi từ khóa tìm kiếm
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset về trang 1 khi thay đổi bộ lọc trạng thái
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter]);
 
   // HÀM TÍNH TỔNG TỒN KHO
   const calculateTotalStock = (item) => {
@@ -76,11 +92,11 @@ function ManageProducts() {
     return stock <= 0 || !isDbActive;
   };
 
-  // Tải danh sách sản phẩm từ API theo trang và limit
+  // Tải danh sách sản phẩm từ API theo trang, limit, từ khóa tìm kiếm và bộ lọc trạng thái
   const loadProducts = async () => {
     try {
-      // ✅ SỬA: Truyền tham số chuẩn dạng (page, limit) khớp với service thông thường
-      const res = await getAllProducts(currentPage, limit); 
+      // ✅ Truyền thêm debouncedSearchTerm và statusFilter vào service gọi API
+      const res = await getAllProducts(currentPage, limit, debouncedSearchTerm, statusFilter); 
       
       const rawList = res?.data || res?.products || [];
       const paginationData = res?.pagination || {};
@@ -148,10 +164,10 @@ function ManageProducts() {
     }
   };
 
-  // Gọi lại API khi thay đổi trang
+  // Gọi lại API khi thay đổi trang, từ khóa tìm kiếm hoặc trạng thái lọc
   useEffect(() => {
     loadProducts();
-  }, [currentPage]);
+  }, [currentPage, debouncedSearchTerm, statusFilter]);
 
   useEffect(() => {
     const handleProductsChange = () => {
@@ -164,29 +180,8 @@ function ManageProducts() {
     };
   }, []);
 
-  // Lọc client-side đối với dữ liệu của trang hiện tại
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      const name = product.Name || product.name || "";
-      const code = product.ProductID || product.id || "";
-
-      const matchesSearch =
-        name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(code).toLowerCase().includes(searchTerm.toLowerCase());
-
-      const isOut = isProductOutOfStock(product);
-
-      if (statusFilter === "inStock") return matchesSearch && !isOut;
-      if (statusFilter === "outOfStock") return matchesSearch && isOut;
-
-      return matchesSearch;
-    });
-  }, [products, searchTerm, statusFilter]);
-
-  // Reset về trang 1 khi thay đổi từ khóa tìm kiếm hoặc bộ lọc
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
+  // Vì Backend đã xử lý tìm kiếm và lọc toàn hệ thống, danh sách sản phẩm render sẽ lấy trực tiếp từ mảng `products`
+  const filteredProducts = products;
 
   // Cuộn lên đầu trang mượt mà mỗi khi đổi trang
   useEffect(() => {

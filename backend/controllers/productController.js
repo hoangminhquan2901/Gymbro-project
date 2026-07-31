@@ -1,6 +1,6 @@
 const db = require('../config/db');
 
-// 1. Lấy danh sách tất cả sản phẩm (Dành cho Admin hoặc quản lý chung)
+// 1. Lấy danh sách tất cả sản phẩm (Dành cho Admin hoặc quản lý chung - Hỗ trợ Tìm kiếm & Lọc trạng thái)
 exports.getAllProducts = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
@@ -11,13 +11,37 @@ exports.getAllProducts = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // 1. Tính tổng số sản phẩm trong bảng Products
-        const [countRows] = await db.query(`SELECT COUNT(*) as total FROM Products`);
+        // Lấy tham số tìm kiếm và lọc từ query string
+        const search = req.query.search ? req.query.search.trim() : '';
+        const status = req.query.status || 'all';
+
+        let whereClauses = [];
+        let queryParams = [];
+
+        // Xử lý điều kiện tìm kiếm (Theo Tên sản phẩm hoặc Mã sản phẩm)
+        if (search) {
+            whereClauses.push("(p.Name LIKE ? OR p.ProductID LIKE ?)");
+            queryParams.push(`%${search}%`, `%${search}%`);
+        }
+
+        // Xử lý điều kiện lọc trạng thái
+        if (status !== 'all') {
+            if (status === 'inStock') {
+                whereClauses.push("p.status = 1");
+            } else if (status === 'outOfStock') {
+                whereClauses.push("p.status = 0");
+            }
+        }
+
+        const whereSql = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+
+        // 1. Tính tổng số sản phẩm thỏa mãn điều kiện tìm kiếm/lọc
+        const [countRows] = await db.query(`SELECT COUNT(*) as total FROM Products p ${whereSql}`, queryParams);
         const totalItems = countRows[0]?.total || 0;
         const totalPages = Math.ceil(totalItems / limit) || 1;
 
-        // 2. Lấy danh sách sản phẩm theo giới hạn phân trang (Đã sửa dùng template literals cho LIMIT/OFFSET)
-        const [products] = await db.query(`
+        // 2. Lấy danh sách sản phẩm theo phân trang kèm điều kiện tìm kiếm và lọc
+        const query = `
             SELECT p.*, 
                    b.Name as BrandName, 
                    c1.Name as CategoryName, 
@@ -26,9 +50,12 @@ exports.getAllProducts = async (req, res) => {
             LEFT JOIN Brands b ON p.BrandID = b.BrandID
             LEFT JOIN Categories c1 ON p.CategoryID = c1.CategoryID
             LEFT JOIN Categories c2 ON p.SubCategoryID = c2.CategoryID
+            ${whereSql}
             ORDER BY p.UpdatedAt DESC
             LIMIT ${limit} OFFSET ${offset}
-        `);
+        `;
+
+        const [products] = await db.query(query, queryParams);
 
         // 3. Lấy thêm Flavors và Goals cho từng sản phẩm trong trang hiện tại
         for (let product of products) {

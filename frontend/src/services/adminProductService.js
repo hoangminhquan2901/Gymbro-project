@@ -9,11 +9,26 @@ function dispatchProductChange() {
 }
 
 /**
- * 1. Lấy tất cả sản phẩm (Có chống Cache 304 để luôn lấy dữ liệu mới nhất từ DB)
+ * 1. Lấy tất cả sản phẩm (Hỗ trợ phân trang, tìm kiếm toàn hệ thống và lọc theo trạng thái)
  */
-export const getAllProducts = async (page = 1, limit = 10) => {
+export const getAllProducts = async (page = 1, limit = 10, search = "", status = "all") => {
     try {
-        const response = await axios.get(`${API_URL}/products?page=${page}&limit=${limit}&_t=${Date.now()}`, {
+        // ✅ Bổ sung thêm tham số search và status vào query string gọi API backend
+        const params = new URLSearchParams({
+            page,
+            limit,
+            _t: Date.now()
+        });
+
+        if (search && search.trim() !== "") {
+            params.append("search", search.trim());
+        }
+
+        if (status && status !== "all") {
+            params.append("status", status);
+        }
+
+        const response = await axios.get(`${API_URL}/products?${params.toString()}`, {
             headers: {
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
                 'Pragma': 'no-cache',
