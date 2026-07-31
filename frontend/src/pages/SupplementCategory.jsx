@@ -77,6 +77,19 @@ function checkProductOutOfStock(product) {
   return false;
 }
 
+function flattenCategories(items) {
+  let result = [];
+  if (!Array.isArray(items)) return result;
+  
+  items.forEach((item) => {
+    result.push(item);
+    if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+      result = result.concat(flattenCategories(item.children));
+    }
+  });
+  return result;
+}
+
 function normalizeCategory(c) {
   if (!c) return null;
   const name = c.Name || c.name || "Chưa có tên danh mục";
@@ -196,7 +209,9 @@ function SupplementCategory() {
         ? rawCatData.data
         : [];
 
-      const normalizedCats = rawCategories
+      const flatRawCategories = flattenCategories(rawCategories);
+
+      const normalizedCats = flatRawCategories
         .map(normalizeCategory)
         .filter(Boolean);
         
