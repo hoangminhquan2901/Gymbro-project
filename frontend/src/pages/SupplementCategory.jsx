@@ -5,7 +5,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import ProductCard from "../components/ProductCard";
 
 import { getWebsiteCategories } from "../services/categoryService";
-import { getWebsiteProducts } from "../services/productService";
+import { getCustomerProductsCursor } from "../services/productService";
 import { slugify } from "../utils/slugify";
 
 const SORT_OPTIONS = [
@@ -26,7 +26,6 @@ const PRICE_RANGES = [
   { label: "Giá trên 2.500.000đ", value: "o25", min: 2500000, max: Infinity },
 ];
 
-// 🎯 HÀM ĐÃ FIX: Hỗ trợ bắt đa dạng các key giá từ Backend (Price, price, PriceSell...)
 function parsePrice(productOrPrice) {
   let rawVal = productOrPrice;
   
@@ -37,12 +36,10 @@ function parsePrice(productOrPrice) {
   if (typeof rawVal === "number") return rawVal;
   if (!rawVal || String(rawVal).toLowerCase().includes("liên hệ")) return 0;
 
-  // Thay thế .replace(/\D/g, "") bằng parseFloat để không bị lỗi dấu chấm thập phân (.00)
   const parsed = parseFloat(rawVal);
   return isNaN(parsed) ? 0 : Math.round(parsed);
 }
 
-// 🎯 HÀM ĐỊNH DẠNG HIỂN THỊ GIÁ TIỀN
 function formatDisplayPrice(product) {
   const numericPrice = parsePrice(product);
   if (numericPrice <= 0) return "Liên hệ";
@@ -102,6 +99,8 @@ function normalizeCategory(c) {
     String(parentId).toLowerCase() === "null" ||
     String(parentId).trim() === "";
 
+  const productCount = Number(c.ProductCount ?? c.productCount ?? 0);
+
   return {
     ...c,
     id: id ? String(id) : "",
@@ -112,7 +111,69 @@ function normalizeCategory(c) {
     parentName,
     parentId: parentId !== null && parentId !== undefined ? String(parentId) : null,
     isRoot: isRoot,
+    productCount,
   };
+}
+
+function getProductCategoryNames(p) {
+  if (!p) return [];
+  const names = [];
+  
+  if (typeof p.category === "string") names.push(p.category);
+  if (typeof p.CategoryName === "string") names.push(p.CategoryName);
+  if (typeof p.categoryName === "string") names.push(p.categoryName);
+  if (typeof p.category_name === "string") names.push(p.category_name);
+  
+  if (p.category && typeof p.category === "object") {
+    if (p.category.name) names.push(p.category.name);
+    if (p.category.Name) names.push(p.category.Name);
+  }
+  if (p.Category && typeof p.Category === "object") {
+    if (p.Category.name) names.push(p.Category.name);
+    if (p.Category.Name) names.push(p.Category.Name);
+  }
+  
+  return names.map(n => String(n).toLowerCase().trim()).filter(Boolean);
+}
+
+function getProductCategoryIds(p) {
+  if (!p) return [];
+  const ids = [];
+  
+  const rawIds = [
+    p.categoryId,
+    p.CategoryID,
+    p.category_id,
+    p.categoryID,
+    p.category?.id,
+    p.category?.CategoryID,
+    p.category?.categoryId,
+    p.Category?.id,
+    p.Category?.CategoryID
+  ];
+  
+  rawIds.forEach(id => {
+    if (id !== null && id !== undefined && id !== "") {
+      ids.push(String(id));
+    }
+  });
+  
+  return ids;
+}
+
+function productBelongsToCategory(product, category, subCategories = []) {
+  if (!product) return false;
+  
+  const targetNames = [category.name, ...subCategories.map(s => s.name)].map(n => String(n).toLowerCase().trim());
+  const targetIds = [category.id, ...subCategories.map(s => s.id)].map(id => String(id));
+  
+  const prodNames = getProductCategoryNames(product);
+  const prodIds = getProductCategoryIds(product);
+  
+  const hasNameMatch = prodNames.some(pName => targetNames.includes(pName));
+  const hasIdMatch = prodIds.some(pId => targetIds.includes(pId));
+  
+  return hasNameMatch || hasIdMatch;
 }
 
 function SupplementCategory() {
@@ -121,12 +182,14 @@ function SupplementCategory() {
   const [onlyInStock, setOnlyInStock] = useState(false);
 
   const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(12);
+  const [loading, setLoading] = useState(true);
 
   async function loadData() {
     try {
+      setLoading(true);
       const rawCatData = await getWebsiteCategories();
-      
       const rawCategories = Array.isArray(rawCatData)
         ? rawCatData
         : Array.isArray(rawCatData?.data)
@@ -139,16 +202,45 @@ function SupplementCategory() {
         
       setCategories(normalizedCats);
 
-      const rawProdData = await getWebsiteProducts();
-      const allProducts = Array.isArray(rawProdData)
-        ? rawProdData
-        : Array.isArray(rawProdData?.data)
-        ? rawProdData.data
-        : [];
-        
-      setProducts(allProducts);
+      let allProds = [];
+      let currentCursor = null;
+      let hasMoreData = true;
+      let safetyCounter = 0;
+
+      while (hasMoreData && safetyCounter < 20) {
+        safetyCounter++;
+        const result = await getCustomerProductsCursor(currentCursor, 50);
+
+        let batch = [];
+        if (Array.isArray(result)) {
+          batch = result;
+          hasMoreData = false;
+        } else if (result && Array.isArray(result.data)) {
+          batch = result.data;
+          hasMoreData = result.pagination?.hasMore ?? false;
+          currentCursor = result.pagination?.nextCursor;
+        } else if (result && Array.isArray(result.items)) {
+          batch = result.items;
+          hasMoreData = result.pagination?.hasMore ?? false;
+          currentCursor = result.pagination?.nextCursor;
+        } else {
+          hasMoreData = false;
+        }
+
+        if (batch.length > 0) {
+          allProds = [...allProds, ...batch];
+        }
+
+        if (!currentCursor || batch.length === 0) {
+          hasMoreData = false;
+        }
+      }
+
+      setAllProducts(allProds);
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu:", error);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -181,28 +273,16 @@ function SupplementCategory() {
             String(sub.parent).toLowerCase() === category.name.toLowerCase()))
     );
 
-    const subCatNames = subCats.map((s) => s.name.toLowerCase().trim());
-    const subCatIds = subCats.map((s) => String(s.id));
+    const subCount = allProducts.filter((p) => 
+      productBelongsToCategory(p, category, subCats)
+    ).length;
 
-    const subCount = products.filter((p) => {
-      if (!p) return false;
-      const pCatName = (p.category || p.CategoryName || "")
-        .toLowerCase()
-        .trim();
-      const pCatId = String(p.categoryId || p.CategoryID || "");
-
-      return (
-        pCatName === category.name.toLowerCase().trim() ||
-        pCatId === category.id ||
-        subCatNames.includes(pCatName) ||
-        subCatIds.includes(pCatId)
-      );
-    }).length;
+    const finalCount = category.productCount > 0 ? category.productCount : subCount;
 
     return {
       ...category,
       subCategories: subCats,
-      count: subCount,
+      count: finalCount,
       icon: category.image ? null : "🥤",
     };
   });
@@ -210,7 +290,7 @@ function SupplementCategory() {
   const priceRange =
     PRICE_RANGES.find((item) => item.value === filterPrice) || PRICE_RANGES[0];
 
-  let filtered = (Array.isArray(products) ? products : []).filter((product) => {
+  let filtered = (Array.isArray(allProducts) ? allProducts : []).filter((product) => {
     if (!product) return false;
     const price = parsePrice(product);
     if (price === 0) return filterPrice === "all";
@@ -219,22 +299,28 @@ function SupplementCategory() {
 
   if (onlyInStock) {
     filtered = filtered.filter(
-        (p) => Number(p.status) === 1
+      (p) => Number(p.status) === 1 || (!checkProductOutOfStock(p))
     );
-}
+  }
 
   filtered = [...filtered].sort((a, b) => {
     const nameA = a?.name || a?.Name || "";
     const nameB = b?.name || b?.Name || "";
     const priceA = parsePrice(a);
     const priceB = parsePrice(b);
+    const idA = Number(a?.ProductID || a?.id || 0);
+    const idB = Number(b?.ProductID || b?.id || 0);
 
     if (sortBy === "name_asc") return nameA.localeCompare(nameB);
     if (sortBy === "name_desc") return nameB.localeCompare(nameA);
     if (sortBy === "price_asc") return priceA - priceB;
     if (sortBy === "price_desc") return priceB - priceA;
+    if (sortBy === "newest") return idB - idA;
     return 0;
   });
+
+  const displayedProducts = filtered.slice(0, visibleCount);
+  const hasMoreProducts = visibleCount < filtered.length;
 
   return (
     <div className="min-h-screen bg-[#E5E5E5] text-[#000000]">
@@ -391,30 +477,47 @@ function SupplementCategory() {
           </aside>
 
           <div>
-            {filtered.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
-                {filtered.map((product, idx) => {
-                  const isOutOfStock = checkProductOutOfStock(product);
-                  const calculatedTag = isOutOfStock ? "Hết hàng" : "Giỏ hàng";
-
-                  return (
-                    <ProductCard
-                      key={product?.ProductID || product?.id || `prod-${idx}`}
-                      product={{
-                        ...product,
-                        id: product?.ProductID || product?.id,
-                        name: product?.Name || product?.name || "Sản phẩm chưa có tên",
-                        price: formatDisplayPrice(product), // 🎯 Đã chuẩn hóa hiển thị giá
-                        img: product?.Image || product?.image || product?.img,
-                        tag: calculatedTag,
-                      }}
-                    />
-                  );
-                })}
+            {loading ? (
+              <div className="text-center py-20 text-gray-400 italic bg-white rounded-xl border border-[#d6d6d6]">
+                Đang tải dữ liệu sản phẩm...
               </div>
+            ) : filtered.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {displayedProducts.map((product, idx) => {
+                    const isOutOfStock = checkProductOutOfStock(product);
+                    const calculatedTag = isOutOfStock ? "Hết hàng" : "Giỏ hàng";
+
+                    return (
+                      <ProductCard
+                        key={product?.ProductID || product?.id || `prod-${idx}`}
+                        product={{
+                          ...product,
+                          id: product?.ProductID || product?.id,
+                          name: product?.Name || product?.name || "Sản phẩm chưa có tên",
+                          price: formatDisplayPrice(product),
+                          img: product?.Image || product?.image || product?.img,
+                          tag: calculatedTag,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {hasMoreProducts && (
+                  <div className="text-center mt-10">
+                    <button
+                      onClick={() => setVisibleCount((prev) => prev + 12)}
+                      className="px-6 py-3 bg-[#14213D] text-white font-bold rounded-xl hover:bg-[#FCA311] hover:text-[#14213D] transition cursor-pointer shadow-md"
+                    >
+                      Xem thêm sản phẩm
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-20 text-gray-400 italic bg-white rounded-xl border border-[#d6d6d6]">
-                Đang cập nhật sản phẩm...
+                Không tìm thấy sản phẩm phù hợp...
               </div>
             )}
           </div>

@@ -5,23 +5,174 @@ import { brands } from '../data/homeData';
 import { slugify } from '../utils/slugify';
 
 import { getWebsiteCategories } from "../services/categoryService";
-import { getWebsiteProducts } from "../services/productService";
+import { getCustomerProductsCursor } from "../services/productService";
+
+// --- CÁC HÀM TIỆN ÍCH CHUẨN HÓA ---
+
+function normalizeCategory(c) {
+  if (!c) return null;
+  const name = c.Name || c.name || "Chưa có tên danh mục";
+  const id = c.CategoryID || c.id || c._id;
+  const parentId = c.ParentCategoryID !== undefined ? c.ParentCategoryID : (c.parentCategoryID ?? c.parentId);
+
+  const parentName = String(
+    c.ParentName ||
+    c.parentName ||
+    (typeof c.parent === "string" ? c.parent : "") ||
+    ""
+  ).trim();
+
+  const isRoot =
+    parentId === null ||
+    parentId === undefined ||
+    parentId === 0 ||
+    parentId === "0" ||
+    String(parentId).toLowerCase() === "null" ||
+    String(parentId).trim() === "";
+
+  return {
+    ...c,
+    id: id ? String(id) : "",
+    name,
+    slug: c.Slug || c.slug || slugify(name),
+    image: c.Image || c.image || c.img,
+    description: c.Description || c.description,
+    parentName,
+    parentId: parentId !== null && parentId !== undefined ? String(parentId) : null,
+    isRoot: isRoot,
+  };
+}
+
+function getProductCategoryNames(p) {
+  if (!p) return [];
+  const names = [];
+  
+  if (typeof p.category === "string") names.push(p.category);
+  if (typeof p.CategoryName === "string") names.push(p.CategoryName);
+  if (typeof p.categoryName === "string") names.push(p.categoryName);
+  if (typeof p.category_name === "string") names.push(p.category_name);
+  
+  if (p.category && typeof p.category === "object") {
+    if (p.category.name) names.push(p.category.name);
+    if (p.category.Name) names.push(p.category.Name);
+  }
+  if (p.Category && typeof p.Category === "object") {
+    if (p.Category.name) names.push(p.Category.name);
+    if (p.Category.Name) names.push(p.Category.Name);
+  }
+  
+  return names.map(n => String(n).toLowerCase().trim()).filter(Boolean);
+}
+
+function getProductCategoryIds(p) {
+  if (!p) return [];
+  const ids = [];
+  const rawIds = [
+    p.categoryId,
+    p.CategoryID,
+    p.category_id,
+    p.categoryID,
+    p.category?.id,
+    p.category?.CategoryID,
+    p.category?.categoryId,
+    p.Category?.id,
+    p.Category?.CategoryID
+  ];
+  
+  rawIds.forEach(id => {
+    if (id !== null && id !== undefined && id !== "") {
+      ids.push(String(id));
+    }
+  });
+  
+  return ids;
+}
+
+function productBelongsToCategory(product, category, subCategories = []) {
+  if (!product) return false;
+  
+  const targetNames = [category.name, ...subCategories.map(s => s.name)].map(n => String(n).toLowerCase().trim());
+  const targetIds = [category.id, ...subCategories.map(s => s.id)].map(id => String(id));
+  
+  const prodNames = getProductCategoryNames(product);
+  const prodIds = getProductCategoryIds(product);
+  
+  const hasNameMatch = prodNames.some(pName => targetNames.includes(pName));
+  const hasIdMatch = prodIds.some(pId => targetIds.includes(pId));
+  
+  return hasNameMatch || hasIdMatch;
+}
+
+function parsePrice(productOrPrice) {
+  let rawVal = productOrPrice;
+  if (productOrPrice && typeof productOrPrice === "object") {
+    rawVal = productOrPrice.price ?? productOrPrice.Price ?? productOrPrice.priceSell ?? productOrPrice.PriceSell;
+  }
+  if (typeof rawVal === "number") return rawVal;
+  if (!rawVal || String(rawVal).toLowerCase().includes("liên hệ")) return 0;
+  const parsed = parseFloat(rawVal);
+  return isNaN(parsed) ? 0 : Math.round(parsed);
+}
+
+function formatDisplayPrice(product) {
+  const numericPrice = parsePrice(product);
+  if (numericPrice <= 0) return "Liên hệ";
+  return numericPrice.toLocaleString("vi-VN") + "đ";
+}
 
 function Home() {
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Load dữ liệu từ Backend
   async function loadData() {
     try {
       setLoading(true);
-      const [cats, prods] = await Promise.all([
-        getWebsiteCategories(),
-        getWebsiteProducts()
-      ]);
-      setCategories(Array.isArray(cats) ? cats : []);
-      setProducts(Array.isArray(prods) ? prods : []);
+      
+      const rawCatData = await getWebsiteCategories();
+      const rawCategories = Array.isArray(rawCatData)
+        ? rawCatData
+        : Array.isArray(rawCatData?.data)
+        ? rawCatData.data
+        : [];
+      const normalizedCats = rawCategories.map(normalizeCategory).filter(Boolean);
+      setCategories(normalizedCats);
+
+      let allProds = [];
+      let currentCursor = null;
+      let hasMoreData = true;
+      let safetyCounter = 0;
+
+      while (hasMoreData && safetyCounter < 20) {
+        safetyCounter++;
+        const result = await getCustomerProductsCursor(currentCursor, 50);
+
+        let batch = [];
+        if (Array.isArray(result)) {
+          batch = result;
+          hasMoreData = false;
+        } else if (result && Array.isArray(result.data)) {
+          batch = result.data;
+          hasMoreData = result.pagination?.hasMore ?? false;
+          currentCursor = result.pagination?.nextCursor;
+        } else if (result && Array.isArray(result.items)) {
+          batch = result.items;
+          hasMoreData = result.pagination?.hasMore ?? false;
+          currentCursor = result.pagination?.nextCursor;
+        } else {
+          hasMoreData = false;
+        }
+
+        if (batch.length > 0) {
+          allProds = [...allProds, ...batch];
+        }
+
+        if (!currentCursor || batch.length === 0) {
+          hasMoreData = false;
+        }
+      }
+
+      setProducts(allProds);
     } catch (error) {
       console.error("Lỗi tải dữ liệu trang chủ:", error);
     } finally {
@@ -33,60 +184,30 @@ function Home() {
     loadData();
   }, []);
 
-  // 🔥 HÀM LỌC CHÍNH XÁC THEO DANH MỤC CHÍNH (MAIN CATEGORY)
-  function getProducts(categoryName) {
-    if (!Array.isArray(products) || !categoryName) return [];
+  function getProductsForSection(sectionTitle) {
+    if (!Array.isArray(products) || !Array.isArray(categories)) return [];
 
-    const targetSlug = slugify(categoryName);
+    const targetSlug = slugify(sectionTitle);
 
-    // 1. Tìm thông tin Danh mục chính từ mảng categories
-    const mainCat = categories.find((c) => {
-      const name = c.Name || c.name || "";
-      return slugify(name) === targetSlug;
+    const mainCategory = categories.find((cat) => {
+      if (!cat.isRoot) return false;
+      return cat.slug === targetSlug || slugify(cat.name) === targetSlug;
     });
 
-    const mainCatId = mainCat ? String(mainCat.CategoryID || mainCat.id || "") : "";
+    if (!mainCategory) return [];
 
-    // 2. Lọc sản phẩm khớp CHÍNH XÁC với Danh mục chính
-    return products.filter((p) => {
-      if (!p) return false;
-
-      // Lấy Category ID / Category Name của sản phẩm (BỎ QUA SUBCATEGORY)
-      let pCatId = "";
-      let pCatName = "";
-
-      if (typeof p.category === "object" && p.category !== null) {
-        pCatId = String(p.category.CategoryID || p.category.id || "");
-        pCatName = p.category.Name || p.category.name || "";
-      } else if (typeof p.category === "string" || typeof p.category === "number") {
-        pCatName = String(p.category);
-      }
-
-      if (p.CategoryID) {
-        pCatId = String(p.CategoryID);
-      }
-      if (p.CategoryName) {
-        pCatName = String(p.CategoryName);
-      }
-
-      // So sánh theo ID (nếu có) hoặc theo Slug của Tên danh mục
-      const isMatchById = mainCatId && pCatId && String(pCatId) === String(mainCatId);
-      const isMatchByName = targetSlug && slugify(pCatName) === targetSlug;
-
-      return isMatchById || isMatchByName;
+    const subCategories = categories.filter((sub) => {
+      return (
+        sub.id !== mainCategory.id &&
+        ((sub.parentId && sub.parentId === mainCategory.id) ||
+          (sub.parentName && sub.parentName.toLowerCase() === mainCategory.name.toLowerCase()))
+      );
     });
+
+    return products.filter((product) => 
+      productBelongsToCategory(product, mainCategory, subCategories)
+    );
   }
-
-  // Helper định dạng giá tiền chuẩn
-  const formatPrice = (price) => {
-    if (price === undefined || price === null || price === "") return "Liên hệ";
-    if (typeof price === "string" && price.endsWith("đ")) return price;
-    
-    const numericValue = parseFloat(price);
-    if (isNaN(numericValue)) return price;
-    
-    return Math.round(numericValue).toLocaleString("vi-VN") + "đ";
-  };
 
   const homeSections = [
     { title: "Whey Protein", slug: "whey-protein" },
@@ -141,7 +262,10 @@ function Home() {
 
       {/* 2. DYNAMIC CATEGORY SECTIONS */}
       {homeSections.map((sec) => {
-        const categoryProducts = getProducts(sec.title);
+        let categoryProducts = getProductsForSection(sec.title);
+
+        // 🌟 Sắp xếp sản phẩm mới nhất lên đầu (ID giảm dần)
+        categoryProducts.sort((a, b) => Number(b.ProductID || b.id || 0) - Number(a.ProductID || a.id || 0));
 
         return (
           <section key={sec.slug} className="w-full bg-white rounded-2xl p-6 shadow-sm border border-[#D1D5DB]">
@@ -160,7 +284,7 @@ function Home() {
                     product={{
                       id: product.ProductID || product.id,
                       name: product.Name || product.name,
-                      price: formatPrice(product.Price || product.price),
+                      price: formatDisplayPrice(product),
                       img: product.Image || product.image,
                       tag: "Giỏ hàng"
                     }}

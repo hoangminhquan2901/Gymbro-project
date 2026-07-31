@@ -51,7 +51,6 @@ import AdminBrands from "./pages/Admin/Brands";
 import ManageProducts from "./pages/Admin/ManageProducts";
 import OrdersAdmin from "./pages/Admin/Orders";
 import Customers from "./pages/Admin/Customers";
-import Users from "./pages/Admin/Users";
 import Profile from "./pages/Admin/Profile";
 
 /* =========================== */
@@ -103,9 +102,6 @@ function Layout() {
 
           {/* Customers */}
           <Route path="customers" element={<Customers />} />
-
-          {/* Users */}
-          <Route path="users" element={<Users />} />
 
           {/* Profile */}
           <Route path="profile" element={<Profile />} />

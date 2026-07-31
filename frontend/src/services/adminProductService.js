@@ -11,10 +11,9 @@ function dispatchProductChange() {
 /**
  * 1. Lấy tất cả sản phẩm (Có chống Cache 304 để luôn lấy dữ liệu mới nhất từ DB)
  */
-export const getAllProducts = async () => {
+export const getAllProducts = async (page = 1, limit = 10) => {
     try {
-        // Thêm timestamp ?_t=... và headers để ép Browser/Server trả về dữ liệu mới (Tránh mã 304)
-        const response = await axios.get(`${API_URL}/products?_t=${Date.now()}`, {
+        const response = await axios.get(`${API_URL}/products?page=${page}&limit=${limit}&_t=${Date.now()}`, {
             headers: {
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
                 'Pragma': 'no-cache',
@@ -23,12 +22,15 @@ export const getAllProducts = async () => {
         });
 
         if (response.data && response.data.success) {
-            return response.data.data || [];
+            return {
+                data: response.data.data || [],
+                pagination: response.data.pagination || { currentPage: 1, totalPages: 1, totalItems: 0, limit: 10 }
+            };
         }
-        return [];
+        return { data: [], pagination: { currentPage: 1, totalPages: 1, totalItems: 0, limit: 10 } };
     } catch (error) {
         console.error('Lỗi khi lấy danh sách sản phẩm:', error);
-        return [];
+        return { data: [], pagination: { currentPage: 1, totalPages: 1, totalItems: 0, limit: 10 } };
     }
 };
 

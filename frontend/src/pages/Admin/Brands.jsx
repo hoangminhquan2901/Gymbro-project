@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Plus, Building2, CheckCircle2, Package, Search, RefreshCw } from "lucide-react";
 
 import {
@@ -18,6 +18,14 @@ function Brands() {
   const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBrand, setSelectedBrand] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // State phân trang Client-side (Cố định limit = 18 mục/trang giống Goals)
+  const [currentPage, setCurrentPage] = useState(1);
+  const limit = 18;
+
+  // Ref để định vị phần đầu trang khi chuyển trang
+  const topRef = useRef(null);
 
   // Điều phối các Modal
   const [modalMode, setModalMode] = useState("add");
@@ -28,15 +36,27 @@ function Brands() {
 
   // Hàm load dữ liệu bất đồng bộ từ Backend API
   const loadBrands = useCallback(async () => {
+    setLoading(true);
     try {
       const brandData = await getAllBrands();
-      // Nếu service sản phẩm của bạn là async, dùng await; nếu là đồng bộ thì giữ nguyên
       const productData = typeof getAllProducts === 'function' ? await getAllProducts() : [];
       
-      setBrands(Array.isArray(brandData) ? brandData : []);
-      setProducts(Array.isArray(productData) ? productData : []);
+      const brandList = Array.isArray(brandData) 
+        ? brandData 
+        : (brandData?.data || brandData?.brands || []);
+
+      const productList = Array.isArray(productData) 
+        ? productData 
+        : (productData?.data || productData?.products || []);
+
+      setBrands(brandList);
+      setProducts(productList);
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu Brands:", error);
+      setBrands([]);
+      setProducts([]);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -52,70 +72,94 @@ function Brands() {
     };
   }, [loadBrands]);
 
-  // Đếm số lượng sản phẩm thuộc về từng thương hiệu (Xử lý chuỗi an toàn)
+  // Đếm số lượng sản phẩm thuộc về từng thương hiệu (Xử lý chuẩn theo BrandID & Name)
   const brandsWithCount = useMemo(() => {
-  return brands.map((b) => {
-    // Lấy ID thương hiệu (Uu tiên BrandID từ DB, fallback sang id)
-    const brandId = b?.BrandID ?? b?.id;
-    const brandName = String(b?.Name || b?.name || "").trim().toLowerCase();
+    const safeBrands = Array.isArray(brands) ? brands : [];
+    const safeProducts = Array.isArray(products) ? products : [];
 
-    const count = products.filter((p) => {
-      const productBrandId = p?.BrandID ?? p?.brandId;
-      
-      // Ưu tiên 1: So sánh theo BrandID (Chuẩn nhất)
-      if (productBrandId !== undefined && brandId !== undefined) {
-        return Number(productBrandId) === Number(brandId);
-      }
+    return safeBrands.map((b) => {
+      const brandId = b?.BrandID ?? b?.id;
+      const brandName = String(b?.Name || b?.name || "").trim().toLowerCase();
 
-      // Ưu tiên 2: Fallback so sánh theo Tên thương hiệu nếu mất ID
-      const productBrandName = String(p?.BrandName || p?.brand || "").trim().toLowerCase();
-      return productBrandName === brandName;
-    }).length;
+      const count = safeProducts.filter((p) => {
+        const productBrandId = p?.BrandID ?? p?.brandId;
+        
+        // Ưu tiên 1: So sánh theo BrandID
+        if (productBrandId !== undefined && brandId !== undefined && productBrandId !== null && brandId !== null) {
+          return Number(productBrandId) === Number(brandId);
+        }
 
-    return { 
-      ...b, 
-      id: brandId, // Chuẩn hóa ID
-      name: b?.Name || b?.name, // Chuẩn hóa Tên
-      productCount: count 
-    };
-  });
-}, [brands, products]);
+        // Ưu tiên 2: Fallback so sánh theo Tên thương hiệu (BrandName)
+        const productBrandName = String(p?.BrandName || p?.brand || "").trim().toLowerCase();
+        return brandName && productBrandName && productBrandName === brandName;
+      }).length;
+
+      return { 
+        ...b, 
+        id: brandId, 
+        name: b?.Name || b?.name, 
+        status: b?.Status || b?.status || "active",
+        productCount: count 
+      };
+    });
+  }, [brands, products]);
 
   // Thống kê tổng quan cho Stat Cards
   const stats = useMemo(() => {
     const total = brandsWithCount.length;
-    const activeCount = brandsWithCount.filter((b) => b.status === "active").length;
+    const activeCount = brandsWithCount.filter((b) => String(b.status).toLowerCase() === "active").length;
     const totalProducts = products.length;
 
     return { total, activeCount, totalProducts };
   }, [brandsWithCount, products]);
 
-  // Lọc thương hiệu theo từ khóa tìm kiếm (An toàn dữ liệu)
+  // 1. Lọc thương hiệu theo từ khóa tìm kiếm
   const filteredBrands = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return brandsWithCount;
 
     return brandsWithCount.filter((b) => {
       const nameMatch = String(b?.name || "").toLowerCase().includes(keyword);
-      const countryMatch = String(b?.country || "").toLowerCase().includes(keyword);
+      const countryMatch = String(b?.Country || b?.country || "").toLowerCase().includes(keyword);
       return nameMatch || countryMatch;
     });
   }, [brandsWithCount, searchTerm]);
 
-  // Đổi trạng thái Hoạt động / Tắt (Bất đồng bộ gọi API)
+  // 2. Tính toán tổng số trang dựa trên danh sách đã lọc
+  const totalItems = filteredBrands.length;
+  const totalPages = Math.ceil(totalItems / limit) || 1;
+
+  // 3. Cắt mảng hiển thị theo trang hiện tại (Client-side Pagination)
+  const paginatedBrands = useMemo(() => {
+    const startIndex = (currentPage - 1) * limit;
+    const endIndex = startIndex + limit;
+    return filteredBrands.slice(startIndex, endIndex);
+  }, [filteredBrands, currentPage, limit]);
+
+  // Reset về trang 1 khi thay đổi từ khóa tìm kiếm
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // ✅ Cuộn lên đầu trang mượt mà mỗi khi đổi trang
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentPage]);
+
+  // Đổi trạng thái Hoạt động / Ẩn (Bất đồng bộ gọi API)
   const handleToggleStatus = async (id, currentStatus) => {
-    // Đồng bộ chuyển đổi thành "hidden" thay vì "inactive" để khớp với hệ thống
     const nextStatus = currentStatus === "active" ? "hidden" : "active";
     
-    // Tìm thương hiệu hiện tại để lấy đủ payload cập nhật
-    const currentBrand = brands.find((b) => b.id === id || b.BrandID === id);
+    const currentBrand = brands.find((b) => (b.id === id || b.BrandID === id));
     if (!currentBrand) return;
 
     try {
-      await updateBrand(id, { ...currentBrand, status: nextStatus });
+      const brandId = currentBrand.BrandID ?? currentBrand.id;
+      await updateBrand(brandId, { ...currentBrand, Status: nextStatus, status: nextStatus });
 
       if (selectedBrand && (selectedBrand.id === id || selectedBrand.BrandID === id)) {
-        setSelectedBrand((prev) => (prev ? { ...prev, status: nextStatus } : null));
+        setSelectedBrand((prev) => (prev ? { ...prev, Status: nextStatus, status: nextStatus } : null));
       }
       loadBrands();
     } catch (error) {
@@ -133,11 +177,12 @@ function Brands() {
   const handleConfirmDelete = async () => {
     if (!selectedBrand) return;
 
-    const brandId = selectedBrand.id || selectedBrand.BrandID;
+    const brandId = selectedBrand.BrandID || selectedBrand.id;
+    const brandName = selectedBrand.Name || selectedBrand.name;
 
     try {
       setIsDeleting(true);
-      await deleteBrand(brandId, selectedBrand.name);
+      await deleteBrand(brandId, brandName);
       setShowDeleteModal(false);
       setSelectedBrand(null);
       loadBrands();
@@ -149,7 +194,7 @@ function Brands() {
   };
 
   return (
-    <div className="space-y-6 font-sans text-gray-800">
+    <div ref={topRef} className="space-y-6 font-sans text-gray-800 animate-in fade-in duration-200">
       {/* Tiêu đề & Nút Action chính */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -162,6 +207,7 @@ function Brands() {
         </div>
 
         <button
+          type="button"
           onClick={() => {
             setModalMode("add");
             setSelectedBrand(null);
@@ -225,11 +271,8 @@ function Brands() {
         <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50/50">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-[#14213D]">
-              Danh sách thương hiệu
+              Danh sách thương hiệu (Hiển thị {paginatedBrands.length} / Tổng {totalItems})
             </h2>
-            <span className="text-xs font-semibold bg-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full">
-              {filteredBrands.length}
-            </span>
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -248,30 +291,151 @@ function Brands() {
             </div>
 
             <button
+              type="button"
               onClick={loadBrands}
+              disabled={loading}
               title="Làm mới dữ liệu"
-              className="p-2 border border-gray-200 rounded-xl bg-white text-gray-600 hover:bg-gray-100 active:scale-95 transition cursor-pointer"
+              className="p-2 border border-gray-200 rounded-xl bg-white text-gray-600 hover:bg-gray-100 active:scale-95 transition cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw size={18} />
+              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
             </button>
           </div>
         </div>
 
         {/* Bảng dữ liệu Brand Table */}
-        <BrandTable
-          brands={filteredBrands}
-          onDetail={(item) => {
-            setSelectedBrand(item);
-            setShowDetailModal(true);
-          }}
-          onEdit={(item) => {
-            setSelectedBrand(item);
-            setModalMode("edit");
-            setShowFormModal(true);
-          }}
-          onDelete={handleDeleteClick}
-          onToggleStatus={handleToggleStatus}
-        />
+        <div className="p-0">
+          {paginatedBrands.length > 0 ? (
+            <BrandTable
+              brands={paginatedBrands}
+              onDetail={(item) => {
+                setSelectedBrand(item);
+                setShowDetailModal(true);
+              }}
+              onEdit={(item) => {
+                setSelectedBrand(item);
+                setModalMode("edit");
+                setShowFormModal(true);
+              }}
+              onDelete={handleDeleteClick}
+              onToggleStatus={handleToggleStatus}
+            />
+          ) : (
+            <div className="text-center py-16 px-4">
+              <div className="w-12 h-12 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Building2 size={24} />
+              </div>
+              <p className="text-gray-500 text-sm font-medium">
+                {searchTerm
+                  ? "Không tìm thấy thương hiệu nào phù hợp với từ khóa"
+                  : "Chưa có thương hiệu nào được tạo trong hệ thống"}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Thanh Phân Trang Căn Giữa (Giống phần Quản lý Mục tiêu) */}
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-gray-100 flex justify-center bg-white">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang đầu"
+              >
+                «
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang trước"
+              >
+                ‹
+              </button>
+
+              {(() => {
+                const pages = [];
+                let startPage = Math.max(1, currentPage - 1);
+                let endPage = Math.min(totalPages, currentPage + 1);
+
+                if (currentPage <= 2) {
+                  endPage = Math.min(totalPages, 4);
+                } else if (currentPage >= totalPages - 1) {
+                  startPage = Math.max(1, totalPages - 3);
+                }
+
+                if (startPage > 1) {
+                  pages.push(1);
+                  if (startPage > 2) {
+                    pages.push("...");
+                  }
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                  if (i > 0 && i <= totalPages) {
+                    pages.push(i);
+                  }
+                }
+
+                if (endPage < totalPages) {
+                  if (endPage < totalPages - 1) {
+                    pages.push("...");
+                  }
+                  pages.push(totalPages);
+                }
+
+                return pages.map((page, index) => {
+                  if (page === "...") {
+                    return (
+                      <span key={`ellipsis-${index}`} className="px-2 text-gray-400 font-medium select-none">
+                        ...
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setCurrentPage(page)}
+                      className={`w-9 h-9 text-sm rounded-lg font-medium transition-colors cursor-pointer flex items-center justify-center ${
+                        currentPage === page
+                          ? "bg-[#3399FF] text-white shadow-sm"
+                          : "border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                });
+              })()}
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang sau"
+              >
+                ›
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang cuối"
+              >
+                »
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Hệ thống Modal */}
@@ -295,7 +459,7 @@ function Brands() {
       <DeleteModal
         open={showDeleteModal}
         title="Xóa thương hiệu"
-        message={`Bạn có chắc muốn xóa thương hiệu "${selectedBrand?.name}" khỏi hệ thống? Hành động này có thể ảnh hưởng đến danh mục sản phẩm thuộc thương hiệu này.`}
+        message={`Bạn có chắc muốn xóa thương hiệu "${selectedBrand?.Name || selectedBrand?.name}" khỏi hệ thống? Hành động này có thể ảnh hưởng đến danh mục sản phẩm thuộc thương hiệu này.`}
         loading={isDeleting}
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleConfirmDelete}

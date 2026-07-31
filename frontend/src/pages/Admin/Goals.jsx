@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Plus, Target, Package, Clock, Search, RefreshCw } from "lucide-react";
 
 import { 
@@ -20,23 +20,39 @@ function Goals() {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // State phân trang Client-side (Cố định limit = 18 mục tiêu/trang)
+  const [currentPage, setCurrentPage] = useState(1);
+  const limit = 18;
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
+  // Ref để định vị phần đầu trang khi chuyển trang
+  const topRef = useRef(null);
+
   // Tải danh sách Nhu cầu & Sản phẩm bất đồng bộ từ Service API
   const loadGoals = async () => {
     setLoading(true);
     try {
-      const fetchedGoals = await getAllGoals();
-      // Nếu getAllProducts chưa async thì dùng trực tiếp, nếu đã đổi sang async thì thêm await
-      const fetchedProducts = await Promise.resolve(getAllProducts());
+      const resGoals = await getAllGoals();
+      const resProducts = await Promise.resolve(getAllProducts());
       
-      setGoals(fetchedGoals || []);
-      setProducts(fetchedProducts || []);
+      const goalList = Array.isArray(resGoals) 
+        ? resGoals 
+        : (resGoals?.data || resGoals?.goals || []);
+
+      const productList = Array.isArray(resProducts) 
+        ? resProducts 
+        : (resProducts?.data || resProducts?.products || []);
+
+      setGoals(goalList);
+      setProducts(productList);
     } catch (error) {
       console.error("Lỗi khi tải dữ liệu mục tiêu:", error);
+      setGoals([]);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -60,36 +76,36 @@ function Goals() {
 
   // 🛠️ Tính toán động số lượng sản phẩm gán vào từng mục tiêu
   const goalsWithCount = useMemo(() => {
-  return goals.map((g) => {
-    const goalId = g?.GoalID ?? g?.id;
-    const goalSlug = String(g?.Slug || g?.slug || "").toLowerCase();
+    const safeGoals = Array.isArray(goals) ? goals : [];
+    const safeProducts = Array.isArray(products) ? products : [];
 
-    // Lọc xem có bao nhiêu sản phẩm chứa GoalID hoặc Slug này trong mảng p.Goals
-    const count = products.filter((p) => {
-      // Trường p.Goals từ API là một mảng []
-      if (Array.isArray(p?.Goals)) {
-        return p.Goals.some((item) => {
-          const itemGoalId = item?.GoalID ?? item?.id;
-          const itemSlug = String(item?.Slug || item?.slug || "").toLowerCase();
+    return safeGoals.map((g) => {
+      const goalId = g?.GoalID ?? g?.id;
+      const goalSlug = String(g?.Slug || g?.slug || "").toLowerCase();
 
-          // Khớp theo GoalID hoặc Slug
-          return (
-            (itemGoalId !== undefined && Number(itemGoalId) === Number(goalId)) ||
-            (goalSlug && itemSlug === goalSlug)
-          );
-        });
-      }
-      return false;
-    }).length;
+      const count = safeProducts.filter((p) => {
+        if (Array.isArray(p?.Goals)) {
+          return p.Goals.some((item) => {
+            const itemGoalId = item?.GoalID ?? item?.id;
+            const itemSlug = String(item?.Slug || item?.slug || "").toLowerCase();
 
-    return {
-      ...g,
-      productCount: count
-    };
-  });
-}, [goals, products]);
+            return (
+              (itemGoalId !== undefined && Number(itemGoalId) === Number(goalId)) ||
+              (goalSlug && itemSlug === goalSlug)
+            );
+          });
+        }
+        return false;
+      }).length;
 
-  // Lọc mục tiêu theo từ khóa tìm kiếm
+      return {
+        ...g,
+        productCount: count
+      };
+    });
+  }, [goals, products]);
+
+  // 1. Lọc mục tiêu theo từ khóa tìm kiếm
   const filteredGoals = useMemo(() => {
     if (!searchTerm.trim()) return goalsWithCount;
     const term = searchTerm.toLowerCase();
@@ -101,7 +117,29 @@ function Goals() {
     );
   }, [goalsWithCount, searchTerm]);
 
-  // Cập nhật gần nhất
+  // 2. Tính toán tổng số trang dựa trên danh sách đã lọc
+  const totalItems = filteredGoals.length;
+  const totalPages = Math.ceil(totalItems / limit) || 1;
+
+  // 3. Cắt mảng hiển thị theo trang hiện tại (Client-side Pagination)
+  const paginatedGoals = useMemo(() => {
+    const startIndex = (currentPage - 1) * limit;
+    const endIndex = startIndex + limit;
+    return filteredGoals.slice(startIndex, endIndex);
+  }, [filteredGoals, currentPage, limit]);
+
+  // Reset về trang 1 khi thay đổi từ khóa tìm kiếm
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // ✅ Cuộn lên đầu trang mượt mà mỗi khi đổi trang
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentPage]);
+
+  // Cập nhật gần nhất (Đã định dạng lại thời gian hiển thị gọn gàng, rõ ràng)
   const lastUpdated = useMemo(() => {
     if (!goals || goals.length === 0) return "Chưa có dữ liệu";
 
@@ -111,7 +149,18 @@ function Goals() {
       return currentDate > latestDate ? current : latest;
     }, goals[0]);
 
-    return latestGoal?.updatedAt || "Vừa cập nhật";
+    if (!latestGoal?.updatedAt) return "Vừa cập nhật";
+
+    const date = new Date(latestGoal.updatedAt);
+    if (isNaN(date.getTime())) return latestGoal.updatedAt;
+
+    return new Intl.DateTimeFormat("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
   }, [goals]);
 
   // Thao tác chỉnh sửa
@@ -150,7 +199,7 @@ function Goals() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div ref={topRef} className="space-y-6 animate-in fade-in duration-200">
       {/* TIÊU ĐỀ TRANG */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -209,7 +258,7 @@ function Goals() {
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
               Cập nhật gần nhất
             </p>
-            <h2 className="text-lg font-bold text-[#14213D] mt-2 truncate max-w-[180px]">
+            <h2 className="text-lg font-bold text-[#14213D] mt-2 truncate max-w-[180px]" title={lastUpdated}>
               {lastUpdated}
             </h2>
           </div>
@@ -224,10 +273,10 @@ function Goals() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 border-b border-gray-100 bg-gray-50/40">
           <div>
             <h2 className="text-lg font-bold text-[#14213D]">
-              Danh sách nhu cầu luyện tập
+              Danh sách nhu cầu luyện tập (Hiển thị {paginatedGoals.length} / Tổng {totalItems})
             </h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              Hiển thị {filteredGoals.length} trên tổng số {totalGoals} mục tiêu
+              Phân trang quản lý danh mục mục tiêu hệ thống
             </p>
           </div>
 
@@ -261,9 +310,9 @@ function Goals() {
         </div>
 
         <div className="p-0">
-          {filteredGoals.length > 0 ? (
+          {paginatedGoals.length > 0 ? (
             <GoalTable
-              goals={filteredGoals}
+              goals={paginatedGoals}
               onEdit={handleEdit}
               onDelete={handleDeleteTrigger}
               onDetail={handleDetailTrigger}
@@ -282,6 +331,110 @@ function Goals() {
             </div>
           )}
         </div>
+
+        {/* Thanh Phân Trang Căn Giữa */}
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-gray-100 flex justify-center bg-white">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang đầu"
+              >
+                «
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang trước"
+              >
+                ‹
+              </button>
+
+              {(() => {
+                const pages = [];
+                let startPage = Math.max(1, currentPage - 1);
+                let endPage = Math.min(totalPages, currentPage + 1);
+
+                if (currentPage <= 2) {
+                  endPage = Math.min(totalPages, 4);
+                } else if (currentPage >= totalPages - 1) {
+                  startPage = Math.max(1, totalPages - 3);
+                }
+
+                if (startPage > 1) {
+                  pages.push(1);
+                  if (startPage > 2) {
+                    pages.push("...");
+                  }
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                  if (i > 0 && i <= totalPages) {
+                    pages.push(i);
+                  }
+                }
+
+                if (endPage < totalPages) {
+                  if (endPage < totalPages - 1) {
+                    pages.push("...");
+                  }
+                  pages.push(totalPages);
+                }
+
+                return pages.map((page, index) => {
+                  if (page === "...") {
+                    return (
+                      <span key={`ellipsis-${index}`} className="px-2 text-gray-400 font-medium select-none">
+                        ...
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setCurrentPage(page)}
+                      className={`w-9 h-9 text-sm rounded-lg font-medium transition-colors cursor-pointer flex items-center justify-center ${
+                        currentPage === page
+                          ? "bg-[#3399FF] text-white shadow-sm"
+                          : "border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                });
+              })()}
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang sau"
+              >
+                ›
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="w-9 h-9 flex items-center justify-center text-sm border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors font-medium text-gray-700 cursor-pointer"
+                title="Trang cuối"
+              >
+                »
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL FORM */}
