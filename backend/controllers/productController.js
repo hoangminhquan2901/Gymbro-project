@@ -7,7 +7,6 @@ exports.getAllProducts = async (req, res) => {
     res.setHeader('Expires', '0');
 
     try {
-        // Lấy số trang và số lượng item trên 1 trang từ query (mặc định trang 1, 10 sản phẩm/trang)
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
@@ -17,7 +16,7 @@ exports.getAllProducts = async (req, res) => {
         const totalItems = countRows[0]?.total || 0;
         const totalPages = Math.ceil(totalItems / limit) || 1;
 
-        // 2. Lấy danh sách sản phẩm theo giới hạn phân trang
+        // 2. Lấy danh sách sản phẩm theo giới hạn phân trang (Đã sửa dùng template literals cho LIMIT/OFFSET)
         const [products] = await db.query(`
             SELECT p.*, 
                    b.Name as BrandName, 
@@ -28,8 +27,8 @@ exports.getAllProducts = async (req, res) => {
             LEFT JOIN Categories c1 ON p.CategoryID = c1.CategoryID
             LEFT JOIN Categories c2 ON p.SubCategoryID = c2.CategoryID
             ORDER BY p.UpdatedAt DESC
-            LIMIT ? OFFSET ?
-        `, [limit, offset]);
+            LIMIT ${limit} OFFSET ${offset}
+        `);
 
         // 3. Lấy thêm Flavors và Goals cho từng sản phẩm trong trang hiện tại
         for (let product of products) {
@@ -91,7 +90,6 @@ exports.getCustomerProducts = async (req, res) => {
             }
         }
 
-        // 1. Xử lý logic gom ID danh mục
         let targetCategoryIds = [];
         if (categoryParam && categoryParam !== 'thuc-pham-bo-sung' && categoryParam !== 'all') {
             let catRows = [];
@@ -110,7 +108,6 @@ exports.getCustomerProducts = async (req, res) => {
             }
         }
 
-        // 🎯 THÊM: Tính tổng số lượng sản phẩm thỏa mãn điều kiện danh mục (chưa phân trang)
         let countQuery = `SELECT COUNT(*) as total FROM Products p WHERE p.status = 1`;
         let countParams = [];
         if (targetCategoryIds.length > 0) {
@@ -121,7 +118,6 @@ exports.getCustomerProducts = async (req, res) => {
         const [countRows] = await db.query(countQuery, countParams);
         const totalProducts = countRows[0]?.total || 0;
 
-        // 2. Xây dựng câu lệnh SQL truy vấn sản phẩm (phân trang)
         let query = `
             SELECT p.*, 
                    b.Name as BrandName, 
@@ -146,8 +142,7 @@ exports.getCustomerProducts = async (req, res) => {
             queryParams.push(lastId);
         }
 
-        query += ` ORDER BY p.ProductID DESC LIMIT ?`;
-        queryParams.push(limit + 1);
+        query += ` ORDER BY p.ProductID DESC LIMIT ${limit + 1}`;
 
         const [rows] = await db.query(query, queryParams);
 
@@ -184,7 +179,7 @@ exports.getCustomerProducts = async (req, res) => {
             pagination: {
                 hasMore,
                 nextCursor,
-                total: totalProducts // 🎯 Trả về tổng số sản phẩm
+                total: totalProducts
             }
         });
     } catch (error) {
