@@ -46,7 +46,7 @@ function Categories() {
   // 🔥 STATE QUẢN LÝ MỞ RỘNG (EXPAND/COLLAPSE) CHO TỪNG DANH MỤC GỐC
   const [expandedRoots, setExpandedRoots] = useState(new Set());
 
-  // 🔥 STATE PHÂN TRANG (Đã đổi limit xuống 3 danh mục gốc / trang)
+  // 🔥 STATE PHÂN TRANG (3 danh mục gốc / trang)
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(3);
 
@@ -60,18 +60,34 @@ function Categories() {
     setLoading(true);
     try {
       const [catData, prodData] = await Promise.all([
-        getAllCategories(),
-        getAllProducts ? getAllProducts() : Promise.resolve([]),
+        getAllCategories(1, 10000),
+        getAllProducts ? getAllProducts(1, 10000) : Promise.resolve([]),
       ]);
 
       const rawCategoryList = Array.isArray(catData)
         ? catData
-        : catData?.data || [];
+        : catData?.data || catData?.categories || [];
       const productList = Array.isArray(prodData)
         ? prodData
-        : prodData?.data || [];
+        : prodData?.data || prodData?.products || [];
 
-      const categoryList = rawCategoryList.map((cat) => {
+      // 🔥 HÀM LÀM PHẲNG CÂY DANH MỤC (Xử lý trường hợp API trả về mảng có chứa thuộc tính `children`)
+      const flattenCategories = (items) => {
+        let result = [];
+        if (!Array.isArray(items)) return result;
+        
+        items.forEach((item) => {
+          result.push(item);
+          if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+            result = result.concat(flattenCategories(item.children));
+          }
+        });
+        return result;
+      };
+
+      const flattenedList = flattenCategories(rawCategoryList);
+
+      const categoryList = flattenedList.map((cat) => {
         const pId =
           cat.ParentCategoryID ??
           cat.parentCategoryID ??
@@ -79,7 +95,7 @@ function Categories() {
           cat.parent_id;
 
         if (pId && !cat.ParentName && !cat.parentName && !cat.parent) {
-          const parentObj = rawCategoryList.find(
+          const parentObj = flattenedList.find(
             (c) => Number(c.CategoryID || c.id) === Number(pId)
           );
           if (parentObj) {

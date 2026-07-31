@@ -39,7 +39,9 @@ function Brands() {
     setLoading(true);
     try {
       const brandData = await getAllBrands();
-      const productData = typeof getAllProducts === 'function' ? await getAllProducts() : [];
+      
+      // ✅ SỬA: Truyền limit lớn (ví dụ: 10000) để lấy toàn bộ sản phẩm phục vụ việc đếm số lượng chính xác cho Brands
+      const productData = typeof getAllProducts === 'function' ? await getAllProducts(1, 10000) : [];
       
       const brandList = Array.isArray(brandData) 
         ? brandData 

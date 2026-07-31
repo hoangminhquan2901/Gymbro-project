@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Plus, Target, Package, Clock, Search, RefreshCw } from "lucide-react";
 
 import { 
@@ -33,11 +33,13 @@ function Goals() {
   const topRef = useRef(null);
 
   // Tải danh sách Nhu cầu & Sản phẩm bất đồng bộ từ Service API
-  const loadGoals = async () => {
+  const loadGoals = useCallback(async () => {
     setLoading(true);
     try {
       const resGoals = await getAllGoals();
-      const resProducts = await Promise.resolve(getAllProducts());
+      
+      // ✅ SỬA: Truyền limit lớn (10000) để lấy toàn bộ sản phẩm phục vụ việc đếm số lượng chính xác cho Goals
+      const resProducts = await Promise.resolve(getAllProducts(1, 10000));
       
       const goalList = Array.isArray(resGoals) 
         ? resGoals 
@@ -56,7 +58,7 @@ function Goals() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadGoals();

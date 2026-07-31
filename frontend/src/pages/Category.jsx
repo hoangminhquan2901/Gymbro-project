@@ -69,26 +69,43 @@ function checkProductOutOfStock(product) {
   return false;
 }
 
+function flattenCategories(items) {
+  let result = [];
+  if (!Array.isArray(items)) return result;
+  
+  items.forEach((item) => {
+    result.push(item);
+    if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+      result = result.concat(flattenCategories(item.children));
+    }
+  });
+  return result;
+}
+
 function normalizeCategory(c) {
   if (!c) return null;
-  const id = c.CategoryID ?? c.categoryID ?? c.id;
+  const id = c.CategoryID ?? c.categoryID ?? c.id ?? c._id;
   const rawParent = c.ParentCategoryID ?? c.parentCategoryID ?? c.parentId;
+  
   const isInvalidParent = 
     rawParent === null || 
     rawParent === undefined || 
     rawParent === "" || 
     rawParent === 0 || 
-    rawParent === "0";
+    rawParent === "0" ||
+    String(rawParent).toLowerCase() === "null" ||
+    String(rawParent).trim() === "";
 
-  const parentCategoryID = isInvalidParent ? null : Number(rawParent);
+  const parentCategoryID = isInvalidParent ? null : String(rawParent);
+  const stringId = id ? String(id) : "";
 
   return {
     ...c,
-    id: Number(id),
-    CategoryID: Number(id),
+    id: stringId,
+    CategoryID: stringId,
     name: c.Name || c.name || "",
     slug: c.Slug || c.slug || slugify(c.Name || c.name || ""),
-    image: c.Image || c.image,
+    image: c.Image || c.image || c.img,
     description: c.Description || c.description,
     ParentCategoryID: parentCategoryID,
     parentId: parentCategoryID,
@@ -107,7 +124,6 @@ function Category() {
   const [isLoading, setIsLoading] = useState(true);
   const [websiteCategories, setWebsiteCategories] = useState([]);
 
-  // Số lượng sản phẩm hiển thị trên lưới (phân trang phía client dựa trên dữ liệu đã tải)
   const [visibleCount, setVisibleCount] = useState(12);
 
   const categoryParam = slug === "thuc-pham-bo-sung" ? null : slug;
@@ -124,13 +140,14 @@ function Category() {
         rawCategories = rawCatRes.data;
       }
 
-      const normalizedCats = rawCategories
+      const flatRawCategories = flattenCategories(rawCategories);
+
+      const normalizedCats = flatRawCategories
         .map(normalizeCategory)
         .filter(Boolean);
         
       setWebsiteCategories(normalizedCats);
 
-      // Tự động tải toàn bộ sản phẩm của danh mục để tính toán chính xác số lượng tiêu đề & lọc
       let allProducts = [];
       let currentCursor = null;
       let hasMoreData = true;
@@ -154,7 +171,7 @@ function Category() {
 
   useEffect(() => {
     loadInitialData();
-    setVisibleCount(12); // Reset về 12 sản phẩm đầu khi đổi danh mục
+    setVisibleCount(12);
 
     const handleDataChange = () => {
       loadInitialData();
@@ -169,7 +186,6 @@ function Category() {
     };
   }, [slug]);
 
-  // Reset lại trang hiển thị khi thay đổi bộ lọc giá hoặc tồn kho hoặc sắp xếp
   useEffect(() => {
     setVisibleCount(12);
   }, [filterPrice, onlyInStock, sortBy]);
@@ -200,7 +216,7 @@ function Category() {
 
   const subCategoriesData = isMainSupplementPage
     ? websiteCategories.filter((item) => item.ParentCategoryID === null && item.slug !== "thuc-pham-bo-sung")
-    : websiteCategories.filter((item) => currentCategory && Number(item.ParentCategoryID) === Number(currentCategory.id || currentCategory.CategoryID));
+    : websiteCategories.filter((item) => currentCategory && String(item.ParentCategoryID) === String(currentCategory.id || currentCategory.CategoryID));
 
   const subCategoryNames = subCategoriesData.map((item) =>
     item.name.toLowerCase().trim()
@@ -276,7 +292,6 @@ function Category() {
     return 0;
   });
 
-  // Danh sách sản phẩm cắt theo số lượng phân trang hiện tại để hiển thị trên lưới
   const paginatedProducts = filtered.slice(0, visibleCount);
   const hasMoreProducts = visibleCount < filtered.length;
 
@@ -370,7 +385,6 @@ function Category() {
         <div className="flex items-center gap-4 mb-8">
           <div className="flex-1 h-px bg-[#d6d6d6]" />
           <h2 className="text-2xl font-black text-[#14213D] uppercase">
-            {/* Tiêu đề hiển thị chuẩn xác tổng số lượng đã lọc ngay lập tức */}
             Tất Cả Sản Phẩm ({filtered.length})
           </h2>
           <div className="flex-1 h-px bg-[#d6d6d6]" />
