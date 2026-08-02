@@ -17,9 +17,10 @@ import {
   X
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { fetchActivities } from "../../services/activityService";
 
 function Profile() {
-  const { user, updateUser } = useAuth(); // Giả định AuthContext có hàm updateUser để lưu thông tin mới
+  const { user, updateProfile } = useAuth(); // Giả định AuthContext có hàm updateUser để lưu thông tin mới
 
   const [activeTab, setActiveTab] = useState("info");
   const [isEditing, setIsEditing] = useState(false);
@@ -32,53 +33,17 @@ function Profile() {
   const [activities, setActivities] = useState([]);
   const lastLogin = "09/07/2026 14:32";
 
-  // Lấy lịch sử hoạt động từ localStorage khi load trang
+  // Lấy lịch sử hoạt động từ Cơ sở dữ liệu MySQL khi load trang
   useEffect(() => {
-    const savedLogs = JSON.parse(localStorage.getItem("admin_activities"));
-    if (savedLogs && savedLogs.length > 0) {
-      setActivities(savedLogs);
-    } else {
-      // Dữ liệu mẫu ban đầu nếu chưa có log nào
-      const defaultLogs = [
-        {
-          id: 1,
-          title: "Đăng nhập hệ thống",
-          description: "Đăng nhập bằng tài khoản Admin",
-          time: "09/07/2026 14:32",
-          iconType: "login",
-        },
-        {
-          id: 2,
-          title: "Thêm sản phẩm",
-          description: "ISO100 Gourmet Chocolate",
-          time: "09/07/2026 14:15",
-          iconType: "package",
-        },
-        {
-          id: 3,
-          title: "Cập nhật sản phẩm",
-          description: "Cập nhật thông tin sản phẩm Rule 1 Whey Vanilla",
-          time: "09/07/2026 13:40",
-          iconType: "pencil",
-        },
-        {
-          id: 4,
-          title: "Tạo thương hiệu mới",
-          description: "Thêm thương hiệu Nutrex Research",
-          time: "09/07/2026 11:20",
-          iconType: "tag",
-        },
-        {
-          id: 5,
-          title: "Xóa danh mục",
-          description: "Xóa danh mục Mass Gainer",
-          time: "09/07/2026 10:05",
-          iconType: "trash",
-        },
-      ];
-      setActivities(defaultLogs);
-      localStorage.setItem("admin_activities", JSON.stringify(defaultLogs));
-    }
+    const loadActivities = async () => {
+      const data = await fetchActivities();
+      if (data && data.length > 0) {
+        setActivities(data);
+      } else {
+        setActivities([]);
+      }
+    };
+    loadActivities();
   }, []);
 
   // Helper render icon tương ứng với log
@@ -101,17 +66,22 @@ function Profile() {
     }
   };
 
-  const handleSaveProfile = () => {
-    // Cập nhật thông tin qua Context hoặc lưu tạm local
-    if (updateUser) {
-      updateUser({ ...user, phone, address, bio });
+  const handleSaveProfile = async () => {
+    // Gọi API updateProfile từ AuthContext để lưu thẳng vào Database MySQL
+    const result = await updateProfile({
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      phone: phone,
+      address: address,
+      bio: bio,
+    });
+
+    if (result.ok) {
+      setIsEditing(false);
+      alert("Cập nhật thông tin cá nhân thành công!");
     } else {
-      // Fallback lưu trực tiếp vào localStorage nếu chưa có hàm updateUser trong Context
-      const updatedUser = { ...(user || {}), phone, address, bio };
-      localStorage.setItem("admin_user", JSON.stringify(updatedUser));
+      alert(result.message || "Cập nhật thất bại!");
     }
-    setIsEditing(false);
-    alert("Cập nhật thông tin cá nhân thành công!");
   };
 
   return (

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import axios from "axios";
+import { logActivity } from "../utils/activityLogger";
 
 const AuthContext = createContext(null);
 const API_URL = "http://localhost:5000/api";
@@ -81,6 +82,11 @@ export function AuthProvider({ children }) {
       if (response.data && response.data.success) {
         const { token, data } = response.data;
         setCurrentUser(data, token);
+
+        if (data.role === "Admin") {
+          logActivity("LOGIN", `Admin (${data.email || email}) đăng nhập hệ thống thành công`);
+        }
+
         return { ok: true, data };
       }
       return { ok: false, message: response.data.message || "Đăng nhập thất bại." };
@@ -139,6 +145,12 @@ export function AuthProvider({ children }) {
 
   // 6. ĐĂNG XUẤT
   function logout() {
+
+    const currentUser = JSON.parse(localStorage.getItem(CURRENT_USER_KEY));
+    if (currentUser && currentUser.role === "Admin") {
+      logActivity("LOGOUT", `Admin (${currentUser.email}) đã đăng xuất khỏi hệ thống`);
+    }
+
     setCurrentUser(null);
   }
 

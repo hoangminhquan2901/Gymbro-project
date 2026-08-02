@@ -173,6 +173,10 @@ exports.getProfile = async (req, res) => {
 // 3. API CẬP NHẬT THÔNG TIN CÁ NHÂN (Profile)
 // ==========================================
 exports.updateProfile = async (req, res) => {
+
+    console.log("--- DỮ LIỆU GỬI LÊN (req.body):", req.body);
+    console.log("--- THÔNG TIN USER TỪ TOKEN (req.user):", req.user);
+
     const { firstName, lastName, phone, address, bio } = req.body;
     const { userId, role } = req.user;
 
@@ -181,23 +185,35 @@ exports.updateProfile = async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Cập nhật thông tin chung ở bảng Users
+        // 1. Cập nhật thông tin chung ở bảng Users
         await connection.query(
             `UPDATE Users SET FirstName = ?, LastName = ?, Phone = ? WHERE UserID = ?`,
-            [firstName, lastName, phone, userId]
+            [firstName || '', lastName || '', phone || '', userId]
         );
 
-        // Cập nhật thông tin ở bảng phụ tương ứng
+        // 2. Cập nhật thông tin ở bảng phụ tương ứng
         if (role === 'Customer') {
             await connection.query(
                 `UPDATE Customers SET Address = ? WHERE UserID = ?`,
-                [address, userId]
+                [address || '', userId]
             );
         } else if (role === 'Admin') {
-            await connection.query(
-                `UPDATE AdminUsers SET Address = ?, Bio = ? WHERE UserID = ?`,
-                [address, bio, userId]
-            );
+            // Kiểm tra xem AdminUsers đã có bản ghi tương ứng với UserID này chưa
+            const [existingAdmin] = await connection.query(`SELECT AdminID FROM AdminUsers WHERE UserID = ?`, [userId]);
+            
+            if (existingAdmin.length > 0) {
+                // Nếu đã có thì tiến hành UPDATE Bio và Address
+                await connection.query(
+                    `UPDATE AdminUsers SET Address = ?, Bio = ? WHERE UserID = ?`,
+                    [address || '', bio || '', userId]
+                );
+            } else {
+                // Nếu chưa có thì INSERT mới để tránh bị mất dữ liệu
+                await connection.query(
+                    `INSERT INTO AdminUsers (UserID, Address, Bio) VALUES (?, ?, ?)`,
+                    [userId, address || '', bio || '']
+                );
+            }
         }
 
         await connection.commit();
