@@ -17,8 +17,8 @@ export default function RevenueChart({ monthlyData = [] }) {
   }));
 
   const formatVND = (value) => {
-    if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-    if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
+    if (value === 0) return "0đ";
+    if (value >= 1e6) return `${(value / 1e6).toFixed(0)}tr`;
     if (value >= 1e3) return `${(value / 1e3).toFixed(0)}K`;
     return `${value}đ`;
   };
@@ -43,7 +43,7 @@ export default function RevenueChart({ monthlyData = [] }) {
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
             <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} tickLine={false} />
-            <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={formatVND} />
+            <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} tickFormatter={formatVND} domain={[0, 500000000]} và ticks={[0, 100000000, 200000000, 300000000, 400000000, 500000000]} />
             <Tooltip
               formatter={(value) => [
                 new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(value),
