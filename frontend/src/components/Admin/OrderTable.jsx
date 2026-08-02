@@ -51,9 +51,10 @@ export default function OrderTable({
     return s === 'Hoàn thành' || s === 'Đã giao hàng';
   }).length;
 
-  const totalRevenue = orders
+  // Chia cho 1000 để loại bỏ 3 số 0 thừa
+  const totalRevenue = (orders
     .filter(o => (o.PaymentStatus || o.paymentStatus) === 'Đã thanh toán' || (o.Status || o.status) === 'Hoàn thành')
-    .reduce((sum, o) => sum + parseAmount(o.TotalAmount || o.totalAmount || o.totalPrice || o.total), 0);
+    .reduce((sum, o) => sum + parseAmount(o.TotalAmount || o.totalAmount || o.totalPrice || o.total), 0)) / 1000;
 
   // Bộ lọc đa tầng 
   const filteredOrders = orders.filter(o => {

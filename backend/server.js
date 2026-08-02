@@ -9,6 +9,8 @@ const goalRoutes = require('./routes/goalRoutes');
 const productRoutes = require('./routes/productRoutes');
 const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes'); // 👈 1. Thêm import route dashboard vào đây
+const statisticsRoutes = require('./routes/statisticsRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,7 +35,8 @@ app.use('/api/goals', goalRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
-
+app.use('/api', dashboardRoutes); // 👈 2. Gắn route dashboard vào đây (kết hợp với /admin trong file route thành /api/admin/dashboard-stats)
+app.use('/api/statistics', statisticsRoutes);
 // Khởi chạy server
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại: http://localhost:${PORT}`);

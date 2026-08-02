@@ -2,14 +2,8 @@ import React, { useState, useEffect } from "react";
 import StatCard from "../../components/Admin/StatCard";
 import RevenueChart from "../../components/Admin/RevenueChart";
 import RecentOrders from "../../components/Admin/RecentOrders";
-
-// Import các Icon từ react-icons (FontAwesome)
 import { FaDollarSign, FaShoppingCart, FaUsers, FaTags } from "react-icons/fa";
-
-// Import các hàm lấy dữ liệu từ Services
-import { getAllProducts } from "../../services/adminProductService"; 
-import { getCustomers } from "../../services/adminCustomerService";
-import { getOrders } from "../../services/orderService";
+import axiosClient from "../../services/axiosClient"; // Đảm bảo đường dẫn tới file axios của bạn là chính xác
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -19,91 +13,52 @@ export default function Dashboard() {
     totalProducts: 0,
   });
 
+  const [orders, setOrders] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
-
-  // Chuyển hàm thành async để chờ API/Database trả về dữ liệu
-  const loadDashboardData = async () => {
-    try {
-      // 1. Lấy danh sách sản phẩm
-      const rawProducts = typeof getAllProducts === "function" ? await getAllProducts() : [];
-      const products = Array.isArray(rawProducts) ? rawProducts : (rawProducts?.data || []);
-
-      // 2. Lấy đơn hàng & Tính tổng doanh thu
-      const rawOrders = typeof getOrders === "function" ? await getOrders() : [];
-      const orders = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.data || []);
-      const totalOrdersCount = orders.length;
-
-      const totalRevenueSum = orders.reduce((sum, order) => {
-        return sum + Number(order.totalAmount || order.total || order.price || 0);
-      }, 0);
-
-      // 3. Lấy danh sách khách hàng
-      const rawCustomers = typeof getCustomers === "function" ? await getCustomers() : [];
-      const customers = Array.isArray(rawCustomers) ? rawCustomers : (rawCustomers?.data || []);
-
-      // Cập nhật các thẻ KPI
-      setStats({
-        totalRevenue: totalRevenueSum,
-        totalOrders: totalOrdersCount,
-        totalCustomers: customers.length,
-        totalProducts: products.length,
-      });
-
-      // 4. Top 5 sản phẩm bán chạy
-      const salesMap = {};
-      orders.forEach((order) => {
-        const items = order.items || order.cartItems || order.products || [];
-        if (Array.isArray(items)) {
-          items.forEach((item) => {
-            const pId = item.productId || item.id || item.name;
-            const pName = item.name || "Sản phẩm";
-            const qty = Number(item.quantity || item.qty || 1);
-            const itemPrice = Number(item.price || 0);
-
-            if (!salesMap[pId]) {
-              salesMap[pId] = {
-                id: pId,
-                name: pName,
-                soldCount: 0,
-                totalRevenue: 0,
-              };
-            }
-            salesMap[pId].soldCount += qty;
-            salesMap[pId].totalRevenue += itemPrice * qty;
-          });
-        }
-      });
-
-      const sortedTopProducts = Object.values(salesMap)
-        .sort((a, b) => b.soldCount - a.soldCount)
-        .slice(0, 5);
-
-      setTopProducts(sortedTopProducts);
-    } catch (error) {
-      console.error("Lỗi đồng bộ Dashboard:", error);
-    }
-  };
+  const [monthlyRevenueData, setMonthlyRevenueData] = useState(Array(12).fill(0));
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadDashboardData = async () => {
+      try {
+        // Gọi đến /admin/dashboard-stats (đã được nối với baseURL /api thành /api/admin/dashboard-stats)
+        const response = await axiosClient.get("/admin/dashboard-stats");
+        const result = response.data;
+
+        if (!isMounted) return;
+
+        if (result && result.success) {
+          const data = result.data;
+          
+          setStats({
+            totalRevenue: data.totalRevenue || 0,
+            totalOrders: data.totalOrders || 0,
+            totalCustomers: data.totalCustomers || 0,
+            totalProducts: data.totalProducts || 0,
+          });
+
+          setOrders(data.recentOrders || []);
+          setMonthlyRevenueData(data.monthlyRevenue || Array(12).fill(0));
+          setTopProducts(data.topProducts || []);
+        }
+      } catch (error) {
+        console.error("Lỗi khi tải dữ liệu Dashboard:", error);
+      }
+    };
+
     loadDashboardData();
 
-    window.addEventListener("productsChanged", loadDashboardData);
-    window.addEventListener("storage", loadDashboardData);
-    window.addEventListener("ordersChanged", loadDashboardData);
-
     return () => {
-      window.removeEventListener("productsChanged", loadDashboardData);
-      window.removeEventListener("storage", loadDashboardData);
-      window.removeEventListener("ordersChanged", loadDashboardData);
+      isMounted = false;
     };
   }, []);
 
   const formatVND = (amount) =>
-    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount || 0);
 
   return (
     <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[#14213d] tracking-tight">Dashboard</h1>
         <p className="text-sm text-slate-500 mt-1">
@@ -137,15 +92,16 @@ export default function Dashboard() {
 
       {/* Biểu đồ Doanh thu */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
-        <RevenueChart />
+        <RevenueChart monthlyData={monthlyRevenueData} />
       </div>
 
       {/* Bố cục bên dưới */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
-          <RecentOrders limit={4} />
+          <RecentOrders orders={orders} limit={4} />
         </div>
 
+        {/* Top 5 Sản phẩm Bán chạy */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">

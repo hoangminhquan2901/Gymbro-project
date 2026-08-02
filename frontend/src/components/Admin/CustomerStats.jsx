@@ -1,7 +1,7 @@
 import React from "react";
 import { FaUsers, FaCrown } from "react-icons/fa";
 
-export default function CustomerStats({ totalCustomers, vipCustomers }) {
+export default function CustomerStats({ totalCustomers, diamondCustomers }) {
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
       <div>
@@ -26,7 +26,7 @@ export default function CustomerStats({ totalCustomers, vipCustomers }) {
               <FaCrown />
             </div>
             <div>
-              <h4 className="text-3xl font-extrabold text-amber-600">{vipCustomers.toLocaleString("vi-VN")}</h4>
+              <h4 className="text-3xl font-extrabold text-amber-600">{diamondCustomers.toLocaleString("vi-VN")}</h4>
               <p className="text-xs font-semibold text-amber-700/70 mt-1">Khách VIP</p>
             </div>
           </div>

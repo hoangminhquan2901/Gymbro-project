@@ -309,7 +309,7 @@ exports.register = async (req, res) => {
 };
 
 // ==========================================
-// 6. API LẤY DANH SÁCH KHÁCH HÀNG CHO ADMIN
+// 6. API LẤY DANH SÁCH KHÁCH HÀNG CHO ADMIN (ĐÃ CẬP NHẬT KÈM LỊCH SỬ ĐƠN HÀNG)
 // ==========================================
 exports.getAllCustomers = async (req, res) => {
     try {
@@ -331,12 +331,17 @@ exports.getAllCustomers = async (req, res) => {
         const query = `
             SELECT 
                 u.UserID as id,
+                c.CustomerID as customerId,
                 CONCAT(u.FirstName, ' ', u.LastName) as name,
                 u.Email as email,
                 u.Phone as phone,
                 u.Role as role,
                 u.IsActive as status,
                 c.Address as address,
+                COALESCE(c.TotalOrders, 0) as totalOrders,
+                COALESCE(c.TotalSpent, 0) as totalSpent,
+                COALESCE(c.Tier, 'Bronze') as tier,
+                c.LastOrderDate as lastOrderDate,
                 u.CreatedAt as createdAt,
                 u.LastLogin as lastLogin
             FROM Users u
@@ -347,6 +352,22 @@ exports.getAllCustomers = async (req, res) => {
         `;
 
         const [customers] = await db.query(query, [Number(limit), Number(offset)]);
+
+        // 3. Lấy thêm lịch sử đơn hàng cho từng khách hàng để hiển thị vào Modal
+        for (let customer of customers) {
+            if (customer.customerId) {
+                const [orders] = await db.query(
+                    `SELECT OrderID as id, CreatedAt as date, TotalAmount as total, Status as status 
+                     FROM Orders 
+                     WHERE CustomerID = ? 
+                     ORDER BY CreatedAt DESC`,
+                    [customer.customerId]
+                );
+                customer.recentOrders = orders;
+            } else {
+                customer.recentOrders = [];
+            }
+        }
 
         return res.status(200).json({
             success: true,

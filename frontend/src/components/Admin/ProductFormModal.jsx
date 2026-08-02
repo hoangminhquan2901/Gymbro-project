@@ -4,9 +4,8 @@ import { getAllCategories } from "../../services/adminCategoryService";
 import { getAllBrands } from "../../services/adminBrandService";
 import { getAllGoals } from "../../services/adminGoalService";
 import { saveProduct } from "../../services/adminProductService";
-// import { uploadImageApi } from "../../services/uploadService"; // Uncomment nếu dự án có service upload riêng
 
-// Hàm helper format số tiền thành dạng "150.000.000"
+// Hàm helper format số tiền thành dạng "1.960.000"
 const formatCurrency = (value) => {
   if (value === null || value === undefined || value === "") return "";
   const numbers = String(value).replace(/\D/g, "");
@@ -23,16 +22,44 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [imageFile, setImageFile] = useState(null); 
-  const [imageUrl, setImageUrl] = useState(""); // Lưu URL chuẩn (chuỗi ảnh từ DB hoặc sau khi upload)
+  const [imageUrl, setImageUrl] = useState(""); 
   const [brand, setBrand] = useState("");
   const [category, setCategory] = useState("");
   const [subCategory, setSubCategory] = useState("");
   const [selectedGoals, setSelectedGoals] = useState([]);
 
-  // Flavors state: Mặc định có 1 dòng trống
+  // Flavors state
   const [flavors, setFlavors] = useState([{ flavorName: "", stock: 0 }]);
 
-  // Fetch danh mục, thương hiệu, goals khi mở Modal
+  // --- CÁC HÀM HELPER QUÉT DỮ LIỆU THÔNG MINH (Bất chấp chữ hoa/thường từ API) ---
+  const getCatId = (c) => {
+    if (!c) return "";
+    for (const key of Object.keys(c)) {
+      const lower = key.toLowerCase();
+      if (lower === "categoryid" || lower === "id") return c[key];
+    }
+    return c.CategoryID || c.id || "";
+  };
+
+  const getParentId = (c) => {
+    if (!c) return null;
+    for (const key of Object.keys(c)) {
+      const lower = key.toLowerCase();
+      if (
+        lower === "parentcategoryid" ||
+        lower === "parentid" ||
+        lower === "parent_category_id" ||
+        lower === "parent_id" ||
+        lower === "parent" 
+      ) {
+        return c[key];
+      }
+    }
+    return null;
+  };
+  // --------------------------------------------------------------------------
+
+  // Fetch dữ liệu khi mở Modal
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -57,7 +84,6 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
           const exactPrice = Math.trunc(Number(rawPrice)); 
           setPrice(exactPrice ? String(exactPrice) : "");
           
-          // Lấy đúng trường ảnh từ sản phẩm cũ (Khắc phục lỗi mất ảnh khi Edit)
           const existingImg = editProduct.Image || editProduct.image || editProduct.ImageUrl || editProduct.imageUrl || "";
           setImageUrl(existingImg);
           setImageFile(null);
@@ -69,20 +95,30 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
           );
           setBrand(foundBrand ? (foundBrand.Name || foundBrand.name) : (editProduct.BrandName || editProduct.brand || ""));
 
-          // 2. Category & SubCategory
+          // 2. Category & SubCategory (Hỗ trợ tìm trong cả cấu trúc cây lẫn phẳng)
           const foundMainCat = catList.find(
-            (c) => String(c.CategoryID || c.id) === String(editProduct.CategoryID) ||
-                   (c.Name || c.name) === editProduct.CategoryName
+            (c) => String(getCatId(c)) === String(editProduct.CategoryID) ||
+                  (c.Name || c.name) === editProduct.CategoryName
           );
-          const foundSubCat = catList.find(
-            (c) => String(c.CategoryID || c.id) === String(editProduct.SubCategoryID) ||
-                   (c.Name || c.name) === editProduct.SubCategoryName
-          );
+          
+          let foundSubCat = null;
+          if (foundMainCat && foundMainCat.children) {
+            foundSubCat = foundMainCat.children.find(
+              (sub) => String(getCatId(sub)) === String(editProduct.SubCategoryID) ||
+                      (sub.Name || sub.name) === editProduct.SubCategoryName
+            );
+          }
+          if (!foundSubCat) {
+            foundSubCat = catList.find(
+              (c) => String(getCatId(c)) === String(editProduct.SubCategoryID) ||
+                    (c.Name || c.name) === editProduct.SubCategoryName
+            );
+          }
 
-          setCategory(foundMainCat ? (foundMainCat.Name || foundMainCat.name) : (editProduct.CategoryName || ""));
-          setSubCategory(foundSubCat ? (foundSubCat.Name || foundSubCat.name) : (editProduct.SubCategoryName || ""));
+          setCategory(foundMainCat ? String(getCatId(foundMainCat)) : "");
+          setSubCategory(foundSubCat ? String(getCatId(foundSubCat)) : "");
 
-          // 3. Chuẩn hóa Goals
+          // 3. Goals
           const rawGoals = editProduct.Goals || editProduct.goals || [];
           const goalNames = rawGoals.map((g) => {
             if (typeof g === "object" && g !== null) return g.Name || g.name;
@@ -91,7 +127,7 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
           }).filter(Boolean);
           setSelectedGoals(goalNames);
 
-          // 4. Chuẩn hóa Flavors & Stock
+          // 4. Flavors & Stock
           const rawFlavors = editProduct.Flavors || editProduct.flavors || [];
           if (Array.isArray(rawFlavors) && rawFlavors.length > 0) {
             setFlavors(
@@ -123,38 +159,40 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
     if (isOpen) fetchData();
   }, [isOpen, editProduct]);
 
-  // Xử lý khi chọn file ảnh từ máy
+  // Xử lý file ảnh
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Kiểm tra dung lượng (ví dụ giới hạn ảnh dưới 2MB để tránh làm nặng DB)
       if (file.size > 2 * 1024 * 1024) {
         alert("Kích thước ảnh quá lớn! Vui lòng chọn ảnh dưới 2MB.");
         return;
       }
-
       const reader = new FileReader();
       reader.onloadend = () => {
-        // reader.result chính là chuỗi Base64 hoàn chỉnh của ảnh
         setImageUrl(reader.result); 
-        setImageFile(file); // Lưu lại file nếu cần dùng việc khác
+        setImageFile(file);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  // Danh mục chính
-  const mainCategories = categories.filter((c) => !c.ParentCategoryID || c.ParentCategoryID === 0);
-
-  // Danh mục phụ thuộc theo danh mục chính đang chọn
-  const subCategories = categories.filter((c) => {
-    if (!category) return false;
-    const selectedMain = mainCategories.find((m) => (m.Name || m.name) === category);
-    if (!selectedMain) return false;
-    return String(c.ParentCategoryID) === String(selectedMain.CategoryID || selectedMain.id);
+  // Lọc Danh mục chính (ParentID trống hoặc bằng 0 / null)
+  const mainCategories = categories.filter((c) => {
+    const pId = getParentId(c);
+    return pId === null || pId === undefined || pId === 0 || pId === "0" || pId === "";
   });
 
-  // Tính TỔNG TỒN KHO hiển thị realtime ngay trên Modal
+  // Lấy danh mục chính đang được chọn
+  const selectedMainCategory = categories.find((c) => String(getCatId(c)) === String(category));
+
+  // Lọc Danh mục phụ (Hỗ trợ cả 2 trường hợp: nằm trong mảng children hoặc dữ liệu phẳng ParentCategoryID)
+  const subCategories = selectedMainCategory?.children || selectedMainCategory?.subCategories || categories.filter((c) => {
+    if (!category) return false;
+    const pId = getParentId(c);
+    if (pId === null || pId === undefined) return false;
+    return String(pId) === String(category);
+  });
+
   const totalCalculatedStock = flavors.reduce((sum, f) => sum + (Number(f.stock) || 0), 0);
 
   const handleGoalToggle = (gName) => {
@@ -185,8 +223,17 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
 
     try {
       const selectedBrandObj = brands.find((b) => (b.Name || b.name) === brand);
-      const selectedMainCatObj = categories.find((c) => (c.Name || c.name) === category);
-      const selectedSubCatObj = categories.find((c) => (c.Name || c.name) === subCategory);
+      const selectedMainCatObj = categories.find((c) => String(getCatId(c)) === String(category));
+      
+      // Tìm đối tượng danh mục phụ từ children hoặc danh sách phẳng
+      let selectedSubCatObj = null;
+      if (selectedMainCatObj && (selectedMainCatObj.children || selectedMainCatObj.subCategories)) {
+        const subList = selectedMainCatObj.children || selectedMainCatObj.subCategories;
+        selectedSubCatObj = subList.find((sub) => String(getCatId(sub)) === String(subCategory));
+      }
+      if (!selectedSubCatObj) {
+        selectedSubCatObj = categories.find((c) => String(getCatId(c)) === String(subCategory));
+      }
 
       const mappedGoalIDs = selectedGoals
         .map((gName) => {
@@ -198,17 +245,16 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
       const currentProductId = editProduct?.ProductID || editProduct?.id;
       const cleanPrice = Number(String(price).replace(/\D/g, "")) || 0;
 
-      // Đóng gói payload gửi lên Backend
       const payload = {
         isEditing: Boolean(editProduct),
         ProductID: currentProductId,
         Name: name,
         Price: cleanPrice,
-        Image: imageUrl, // Lúc này `imageUrl` đang chứa chuỗi Base64 dài, lưu thẳng vào DB cột Image (LONGTEXT)
-        Status: editProduct?.Status ?? true,
+        Image: imageUrl, 
+        Status: editProduct?.Status ?? editProduct?.status ?? true,
         BrandID: selectedBrandObj ? (selectedBrandObj.BrandID || selectedBrandObj.id) : "",
-        CategoryID: selectedMainCatObj ? (selectedMainCatObj.CategoryID || selectedMainCatObj.id) : "",
-        SubCategoryID: selectedSubCatObj ? (selectedSubCatObj.CategoryID || selectedSubCatObj.id) : "",
+        CategoryID: selectedMainCatObj ? getCatId(selectedMainCatObj) : "",
+        SubCategoryID: selectedSubCatObj ? getCatId(selectedSubCatObj) : "",
         Stock: totalCalculatedStock,
         Flavors: flavors.map((f) => ({
           FlavorName: f.flavorName,
@@ -328,38 +374,49 @@ function ProductFormModal({ isOpen, onClose, editProduct, onSuccess }) {
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">DANH MỤC CHÍNH *</label>
                 <select
-                  value={category}
-                  onChange={(e) => {
-                    setCategory(e.target.value);
-                    setSubCategory("");
-                  }}
-                  required
-                  className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white"
+                    value={category}
+                    onChange={(e) => {
+                        setCategory(e.target.value);
+                        setSubCategory(""); 
+                    }}
+                    required
+                    className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white"
                 >
-                  <option value="">Chọn danh mục chính...</option>
-                  {mainCategories.map((c) => (
-                    <option key={c.CategoryID || c.id} value={c.Name || c.name}>
-                      {c.Name || c.name}
-                    </option>
-                  ))}
+                    <option value="">Chọn danh mục chính...</option>
+                    {mainCategories.map((c) => {
+                        const cId = getCatId(c);
+                        return (
+                            <option key={cId} value={cId}>
+                                {c.Name || c.name}
+                            </option>
+                        );
+                    })}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">DANH MỤC PHỤ *</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  DANH MỤC PHỤ {subCategories.length > 0 ? "*" : "(Không bắt buộc)"}
+                </label>
                 <select
                   value={subCategory}
                   onChange={(e) => setSubCategory(e.target.value)}
-                  required
+                  // Chỉ bắt buộc nếu có danh mục con để chọn
+                  required={subCategories.length > 0} 
                   disabled={!category || subCategories.length === 0}
-                  className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-100"
+                  className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
-                  <option value="">Chọn danh mục phụ...</option>
-                  {subCategories.map((sub) => (
-                    <option key={sub.CategoryID || sub.id} value={sub.Name || sub.name}>
-                      {sub.Name || sub.name}
-                    </option>
-                  ))}
+                  <option value="">
+                    {subCategories.length === 0 ? "-- Danh mục này không có danh mục phụ --" : "Chọn danh mục phụ..."}
+                  </option>
+                  {subCategories.map((sub) => {
+                    const subId = getCatId(sub);
+                    return (
+                      <option key={subId} value={subId}>
+                        {sub.Name || sub.name}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
