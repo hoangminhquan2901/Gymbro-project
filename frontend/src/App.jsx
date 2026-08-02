@@ -71,99 +71,53 @@ function ScrollToTop() {
 */
 function Layout() {
   const location = useLocation();
-
   const isAdmin = location.pathname.startsWith("/admin");
 
   if (isAdmin) {
     return (
-      <Routes>
-        <Route path="/admin" element={<AdminLayout />}>
-          {/* Dashboard */}
-          <Route index element={<Dashboard />} />
-          <Route path="dashboard" element={<Dashboard />} />
-
-          {/* Statistics */}
-          <Route path="statistics" element={<Statistics />} />
-
-          {/* Categories */}
-          <Route path="categories" element={<Categories />} />
-
-          {/* Goals */}
-          <Route path="goals" element={<Goals />} />
-
-          {/* Brands */}
-          <Route path="brands" element={<AdminBrands />} />
-
-          {/* Products */}
-          <Route path="products" element={<ManageProducts />} />
-
-          {/* Orders */}
-          <Route path="orders" element={<OrdersAdmin />} />
-
-          {/* Customers */}
-          <Route path="customers" element={<Customers />} />
-
-          {/* Profile */}
-          <Route path="profile" element={<Profile />} />
-        </Route>
-      </Routes>
+      <ProtectedRoute adminOnly={true}> {/* 👈 Bọc bảo vệ ở đây */}
+        <Routes>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="statistics" element={<Statistics />} />
+            <Route path="categories" element={<Categories />} />
+            <Route path="goals" element={<Goals />} />
+            <Route path="brands" element={<AdminBrands />} />
+            <Route path="products" element={<ManageProducts />} />
+            <Route path="orders" element={<OrdersAdmin />} />
+            <Route path="customers" element={<Customers />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
+        </Routes>
+      </ProtectedRoute>
     );
   }
 
   return (
     <div className="min-h-screen flex flex-col font-sans bg-[var(--bg-color)] text-[var(--text-color)]">
-
       <Header />
       <Navbar />
-
       <main className="flex-1">
         <Routes>
-
+          {/* Các route của user giữ nguyên như cũ của bạn */}
           <Route path="/" element={<Home />} />
-
-          <Route
-            path="/category/thuc-pham-bo-sung"
-            element={<SupplementCategory />}
-          />
-
-          <Route
-            path="/category/muc-tieu-nhu-cau"
-            element={<GoalSupplementCategory />}
-          />
-
+          <Route path="/category/thuc-pham-bo-sung" element={<SupplementCategory />} />
+          <Route path="/category/muc-tieu-nhu-cau" element={<GoalSupplementCategory />} />
           <Route path="/category/:slug" element={<Category />} />
-
           <Route path="/goal/:slug" element={<GoalCategory />} />
-
           <Route path="/products/:subSlug" element={<ProductList />} />
-
           <Route path="/brands" element={<Brands />} />
-
           <Route path="/brands/:brandSlug" element={<BrandDetail />} />
-
           <Route path="/product/:id" element={<ProductDetail />} />
-
           <Route path="/bmi" element={<BMI />} />
-
           <Route path="/tdee" element={<TDEE />} />
-
           <Route path="/cart" element={<Cart />} />
-
           <Route path="/checkout" element={<Checkout />} />
-
           <Route path="/login" element={<Login />} />
-
           <Route path="/register" element={<Register />} />
-
-          <Route
-            path="/forgot-password"
-            element={<ForgotPassword />}
-          />
-
-          <Route
-            path="/reset-password"
-            element={<ResetPassword />}
-          />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           <Route
             path="/profile"
@@ -173,7 +127,6 @@ function Layout() {
               </ProtectedRoute>
             }
           />
-
           <Route
             path="/profile/orders"
             element={
@@ -182,7 +135,6 @@ function Layout() {
               </ProtectedRoute>
             }
           />
-
           <Route
             path="/profile/password"
             element={
@@ -192,25 +144,12 @@ function Layout() {
             }
           />
 
-          <Route
-            path="/khuyen-mai"
-            element={<div>Đang cập nhật</div>}
-          />
-
-          <Route
-            path="/kien-thuc"
-            element={<div>Đang cập nhật</div>}
-          />
-
-          <Route
-            path="/he-thong-cua-hang"
-            element={<div>Đang cập nhật</div>}
-          />
+          <Route path="/khuyen-mai" element={<div>Đang cập nhật</div>} />
+          <Route path="/kien-thuc" element={<div>Đang cập nhật</div>} />
+          <Route path="/he-thong-cua-hang" element={<div>Đang cập nhật</div>} />
         </Routes>
       </main>
-
       <Footer />
-
     </div>
   );
 }

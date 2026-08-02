@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logActivity } from "../utils/activityLogger";
 
 const API_URL = "http://localhost:5000/api/auth";
 
@@ -11,7 +12,7 @@ export const getCustomers = async (page = 1, limit = 10) => {
     });
     
     if (response.data && response.data.success) {
-      return response.data; // Trả về cả { success, data, pagination }
+      return response.data; 
     }
     return { data: [], pagination: {} };
   } catch (error) {
@@ -20,7 +21,8 @@ export const getCustomers = async (page = 1, limit = 10) => {
   }
 };
 
-export const updateCustomerStatus = async (customerId, status) => {
+// Đã bổ sung thêm tham số customerName vào hàm
+export const updateCustomerStatus = async (customerId, status, customerName = "") => {
   try {
     const response = await axios.put(
       `${API_URL}/admin/customers/${customerId}/status`,
@@ -31,6 +33,13 @@ export const updateCustomerStatus = async (customerId, status) => {
         }
       }
     );
+
+    const actionText = (status === 1 || status === true || status === "1") ? "Mở khóa tài khoản" : "Khóa tài khoản";
+    
+    // Sử dụng biến customerName an toàn
+    const targetDesc = customerName ? `${actionText} khách hàng "${customerName}"` : `${actionText} khách hàng ID: ${customerId}`;
+    logActivity("TOGGLE_CUSTOMER_STATUS", targetDesc);
+    
     return response.data;
   } catch (error) {
     console.error("Lỗi khi cập nhật trạng thái khách hàng:", error);

@@ -47,7 +47,7 @@ export async function addGoal(goal) {
     const result = await response.json();
     if (!result.success) throw new Error(result.message);
 
-    logActivity("Tạo nhu cầu mới", `Thêm nhu cầu "${goal.name}"`, "success");
+    logActivity("ADD_GOAL", goal.name);
     dispatchChange();
     return result;
   } catch (error) {
@@ -74,7 +74,7 @@ export async function updateGoal(id, newData) {
     const result = await response.json();
     if (!result.success) throw new Error(result.message);
 
-    logActivity("Cập nhật nhu cầu", `Cập nhật thông tin nhu cầu ID: ${id}`, "info");
+    logActivity("UPDATE_GOAL", newData.name);
     dispatchChange();
     return result;
   } catch (error) {
@@ -94,7 +94,7 @@ export async function deleteGoal(id, goalName = "") {
     const result = await response.json();
     if (!result.success) throw new Error(result.message);
 
-    logActivity("Xóa nhu cầu", `Xóa nhu cầu "${goalName || id}"`, "danger");
+    logActivity("DELETE_GOAL", goalName || `ID: ${id}`);
     dispatchChange();
     return result;
   } catch (error) {
